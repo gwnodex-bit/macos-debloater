@@ -29,9 +29,9 @@ One script. No agent, no daemon, no account, no telemetry. It writes to the laun
 
 ---
 
-## ⚡ What it does
+## What this shit does?
 
-macOS starts ~200 background services on every boot. Most of them exist to phone home, sync, index, or wait for a feature you never open. This script disables the ones you choose, by writing the same XPC disabled database that `launchctl disable` writes. Nothing under `/System` is touched. No plist is deleted. Every change is one command away from being undone.
+macOS ship ~200 shtitty background services on every boot. Most of them exist to phone home, sync, index, or wait for a feature you never open. This script disables the ones you choose, by writing the same XPC disabled database that `launchctl disable` writes. Nothing under `/System` is touched. No plist is deleted. Every change is one command away from being undone.
 
 It also applies the optimization tweaks that are safe enough to ship: window and dock animation off, transparency off, Spotlight indexing off, power-nap and wake-on-LAN off, and — in the aggressive modes — kernel and network settings that are documented, revertible, and labelled with what they can cost you.
 
