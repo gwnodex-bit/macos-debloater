@@ -60,8 +60,9 @@ Everything lives in one menu. No flags, no arguments, nothing to remember:
 
 - **Pick a mode** — Safe through Dangerous. It prints the full plan before anything happens.
 - **Dry-run** — flip it on and every command is shown without being run. This works even with SIP enabled.
+- **Pick** — browse the whole catalog and mark services by hand (`space` to mark, `Enter` to apply). Same safety gates as the modes, so you can't sneak a boot-critical service through.
 - **Custom** — type specific labels (`com.apple.weatherd com.apple.newsd`) and only those get turned off.
-- **List** — print the whole catalog for your exact macOS version.
+- **List** — browse the whole catalog for your exact macOS version, scrollable and color-coded by tier.
 - **Restore** — undo the last run, restore the defaults/pmset/Spotlight tweaks, or re-enable every catalog entry. Restore needs no network and no account.
 
 Two safety rails sit under the whole thing:
@@ -171,7 +172,7 @@ macos-debloater.sh
 ├── snapshot + restore     disabled-DB snapshot, manifest, generated restore.sh
 ├── optimization tweaks    defaults / pmset / sysctl / mdutil, old values saved
 ├── output                 catalog listing, header, mode notes
-├── TUI                    the menu: 13 items, mouse + keyboard
+├── TUI                    the menu: 14 items, mouse + keyboard
 ├── prompts + gates        thermal YES-gate, double-confirm, reboot prompt
 ├── silent fleet run       AUTO_APPLY: config replaces the TUI, no prompts
 └── main                   load_config -> TUI (or silent) -> SIP gate -> apply

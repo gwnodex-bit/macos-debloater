@@ -12,7 +12,7 @@ if [ -z "${BASH_VERSION:-}" ]; then
   exec /bin/bash "$0" "$@"
 fi
 set -u
-VERSION="1.3.4"
+VERSION="1.3.5"
 SCRIPT_NAME="macos-debloater"
 
 # Root-only by design (enterprise / fleet): state is system-wide under
@@ -109,6 +109,7 @@ DRY_RUN=0        # 0 = apply for real, 1 = preview only (TUI toggle)
 ASK_THERMAL=0    # 0 = thermal daemon only in Mode 4, 1 = also Modes 1-3 (TUI toggle)
 MODE=0           # selected mode 1..4; set when a mode is chosen in the TUI
 MANUAL_LABELS="" # extra labels typed into the Custom menu item
+MANUAL_PICKED=0  # 1 = services marked by hand in the Pick menu (SELECTED_TMP already filled)
 AUTO_APPLY=0     # 1 = silent run from config file (enterprise fleet / MDM)
 PLAN_OK=0        # 1 = plan was built + confirmed inside the TUI (skip re-prompting)
 HIBERNATE_OFF=0  # 0 = keep safe-sleep/hibernation, 1 = hibernatemode 0 + drop sleepimage (Mode 4)
@@ -1004,31 +1005,6 @@ restore_optimizations() {
 }
 
 # ---- output -----------------------------------------------------------------
-list_catalog() {
-  local domain label tier group desc
-  log "${C_BOLD}Catalog for ${OS_VER} (${HW_ARCH})${C_RST}"
-  log ""
-  log "${C_GRN}Tier 1 - Safe${C_RST}"
-  while IFS='|' read -r domain label tier group desc; do
-    [[ "$tier" == "1" ]] && printf "  ${C_CYN}%-6s${C_RST} %-56s ${C_DIM}%s${C_RST}\n" "$domain" "$label" "$desc"
-  done < <(sort -u -t'|' -k1,1 -k2,2 "$RESOLVED_TMP")
-  log ""
-  log "${C_YLW}Tier 2 - Balanced / Aggressive${C_RST}"
-  while IFS='|' read -r domain label tier group desc; do
-    [[ "$tier" == "2" ]] && printf "  ${C_CYN}%-6s${C_RST} %-56s ${C_DIM}%s${C_RST}\n" "$domain" "$label" "$desc"
-  done < <(sort -u -t'|' -k4,4 -k1,1 -k2,2 "$RESOLVED_TMP")
-  log ""
-  log "${C_RED}Tier 3 - Thermal (Mode 4)${C_RST}"
-  while IFS='|' read -r domain label tier group desc; do
-    [[ "$tier" == "3" ]] && printf "  ${C_CYN}%-6s${C_RST} ${C_BOLD}%-56s${C_RST} ${C_DIM}%s${C_RST}\n" "$domain" "$label" "$desc"
-  done < <(sort -u -t'|' -k1,1 -k2,2 "$RESOLVED_TMP")
-  log ""
-  log "${C_RED}${C_BOLD}Tier 4 - Dangerous extras (Mode 4)${C_RST}"
-  while IFS='|' read -r domain label tier group desc; do
-    [[ "$tier" == "4" ]] && printf "  ${C_CYN}%-6s${C_RST} ${C_RED}%-56s${C_RST} ${C_DIM}%s${C_RST}\n" "$domain" "$label" "$desc"
-  done < <(sort -u -t'|' -k1,1 -k2,2 "$RESOLVED_TMP")
-}
-
 print_header() {
   local sipc drun
   if [[ "$SIP_STATE" == "disabled" ]]; then sipc="${C_GRN}"; elif [[ "$SIP_STATE" == "enabled" ]]; then sipc="${C_RED}"; else sipc="${C_YLW}"; fi
@@ -1083,6 +1059,7 @@ mode_note() {
 }
 
 # ---- TUI --------------------------------------------------------------------
+RBLOCK_KEY=""; RBLOCK_TEXT=""
 TUI_ITEMS=(
   "Safe        telemetry, analytics, Siri/AI backends off; user features kept"
   "Balanced    Safe + iCloud extras, Maps, media, App Store, network services"
@@ -1090,7 +1067,8 @@ TUI_ITEMS=(
   "Dangerous   Aggressive + thermal daemon + App Store/Mail/Contacts/reporting extras"
   "Dry-run     OFF - apply changes | ON - preview only"
   "Thermal     OFF - Mode 4 only | ON - also Modes 1-3"
-  "List        print the full catalog for this macOS"
+  "List        browse the full catalog for this macOS"
+  "Pick        mark services by hand, then disable them"
   "Restore     undo the last run (services only)"
   "Restore features  undo defaults/pmset/Spotlight tweaks"
   "Restore all re-enable every catalog entry"
@@ -1098,7 +1076,7 @@ TUI_ITEMS=(
   "SIP help    how to disable SIP (with video link)"
   "Quit"
 )
-TUI_ACTIONS=("mode1" "mode2" "mode3" "mode4" "dryrun" "thermal" "list" "restore" "restorefeat" "restoreall" "custom" "siphelp" "quit")
+TUI_ACTIONS=("mode1" "mode2" "mode3" "mode4" "dryrun" "thermal" "list" "pick" "restore" "restorefeat" "restoreall" "custom" "siphelp" "quit")
 TUI_SEL=0
 TUI_DONE=0
 COLS=80
@@ -1177,6 +1155,7 @@ TUI_DESC=(
   "Preview only: every command is printed, nothing is executed. Works even with SIP enabled."
   "Include the thermal daemon in Modes 1-3 as well. Default: Mode 4 only."
   "Print the full service catalog for this exact macOS version."
+  "Mark services with space in a browseable list, then disable them. Same safety gates as the modes."
   "Re-enable the services disabled by the last run."
   "Undo the defaults/pmset/Spotlight tweaks back to the saved values."
   "Re-enable every catalog entry, regardless of what ran."
@@ -1194,22 +1173,23 @@ tui_left_text() { # menu row text (left panel)
     3) cnt="${MODE_COUNTS[4]:-}"; printf 'Dangerous%s' "${cnt:+ (${cnt})}" ;;
     4) if [[ "$DRY_RUN" == "1" ]]; then printf 'Dry-run: ON'; else printf 'Dry-run: OFF'; fi ;;
     5) if [[ "$ASK_THERMAL" == "1" ]]; then printf 'Thermal: ON'; else printf 'Thermal: OFF'; fi ;;
-    6) printf 'List catalog' ;;
-    7) printf 'Restore last run' ;;
-    8) printf 'Restore features' ;;
-    9) printf 'Restore all' ;;
-    10) printf 'Custom labels' ;;
-    11) printf 'SIP help' ;;
-    12) printf 'Quit' ;;
+  6) printf 'List catalog' ;;
+  7) printf 'Pick services' ;;
+  8) printf 'Restore last run' ;;
+  9) printf 'Restore features' ;;
+  10) printf 'Restore all' ;;
+  11) printf 'Custom labels' ;;
+  12) printf 'SIP help' ;;
+  13) printf 'Quit' ;;
   esac
 }
 
 tui_item_short() { # short label for the About panel
   case "$1" in
     0) printf 'Safe' ;; 1) printf 'Balanced' ;; 2) printf 'Aggressive' ;; 3) printf 'Dangerous' ;;
-    4) printf 'Dry-run' ;; 5) printf 'Thermal' ;; 6) printf 'List' ;; 7) printf 'Restore' ;;
-    8) printf 'Restore features' ;; 9) printf 'Restore all' ;; 10) printf 'Custom' ;;
-    11) printf 'SIP help' ;; 12) printf 'Quit' ;;
+    4) printf 'Dry-run' ;; 5) printf 'Thermal' ;; 6) printf 'List' ;; 7) printf 'Pick' ;;
+    8) printf 'Restore' ;; 9) printf 'Restore features' ;; 10) printf 'Restore all' ;; 11) printf 'Custom' ;;
+    12) printf 'SIP help' ;; 13) printf 'Quit' ;;
   esac
 }
 
@@ -1314,11 +1294,15 @@ tui_draw() {
   else
     printf '│  %s  │\n' "$(tui_panel_top ' Select ' "$TL")"
   fi
-  # right panel block (regenerated per draw; depends on TUI_SEL)
+  # right panel block (cached per TUI_SEL+width: only rebuilt when either changes)
   local -a rblock=()
   local l
   if [[ "$TR" -gt 0 ]]; then
-    while IFS= read -r l; do rblock+=("$l"); done <<< "$(tui_detail_block "$TR")"
+    if [[ "$TUI_SEL:$TR" != "${RBLOCK_KEY:-}" ]]; then
+      RBLOCK_KEY="$TUI_SEL:$TR"
+      RBLOCK_TEXT="$(tui_detail_block "$TR")"
+    fi
+    while IFS= read -r l; do rblock+=("$l"); done <<< "$RBLOCK_TEXT"
   fi
   # item rows
   for ((i=0;i<n;i++)); do
@@ -1378,10 +1362,14 @@ tui_exec() {
     thermal)
       if [[ "$ASK_THERMAL" == "1" ]]; then ASK_THERMAL=0; else ASK_THERMAL=1; fi ;;
     list)
-      tui_screen_off
-      list_catalog
-      tui_pause
-      tui_screen_on
+      tui_service_list view
+      ;;
+    pick)
+      if tui_service_list pick; then
+        MANUAL_PICKED=1
+        MODE=0
+        TUI_DONE=1
+      fi
       ;;
     restore)
       tui_screen_off
@@ -1574,6 +1562,100 @@ tui_plan_screen() { # scrollable plan inside the TUI; Enter confirms, q backs ou
   done
 }
 
+tui_service_list() { # view|pick - framed scrollable catalog; pick returns 0 when confirmed
+  local mode="$1"
+  local -a rows=() picked=()
+  local i sel=0 off=0 vh key domain label tier group desc line mark
+  local w="${COLS:-80}" lh="${LINES:-24}" n=0 marked=0 risk=0
+  local tier1=0 tier2=0 tier3=0 tier4=0
+  while IFS='|' read -r domain label tier group desc; do
+    [[ -z "$label" ]] && continue
+    [[ "$mode" == "pick" ]] && is_denied "$label" && continue
+    rows+=("$domain|$label|$tier|$group|$desc")
+    picked+=(0)
+    case "$tier" in
+      1) tier1=$((tier1+1)) ;; 2) tier2=$((tier2+1)) ;; 3) tier3=$((tier3+1)) ;; 4) tier4=$((tier4+1)) ;;
+    esac
+  done < <(sort -u -t'|' -k3,3n -k4,4 -k1,1 -k2,2 "$RESOLVED_TMP")
+  n=${#rows[@]}
+  if [[ "$n" == "0" ]]; then
+    printf '\033[2J\033[H'
+    printf '┌%s┐\n' "$(tui_rep '─' $(( w - 2 )))"
+    printf '│%s│\n' "$(tui_lpad ' No services resolve on this macOS.' $(( w - 2 )))"
+    printf '└%s┘\n' "$(tui_rep '─' $(( w - 2 )))"
+    return 1
+  fi
+  while :; do
+    printf '\033[2J\033[H'
+    if [[ "$mode" == "pick" ]]; then
+      tui_topbar " Pick services - ${marked} marked " " ${C_BOLD}${C_MAG}Pick services - ${marked} marked${C_RST} " "$w"; echo ""
+    else
+      tui_topbar " Catalog - ${OS_VER} (${HW_ARCH}) - ${n} services " " ${C_BOLD}${C_MAG}Catalog - ${OS_VER} (${HW_ARCH})${C_RST} - ${n} services " "$w"; echo ""
+    fi
+    printf '│  %s  │\n' "$(tui_lpad " safe ${tier1}   aggr ${tier2}   thermal ${tier3}   danger ${tier4}" $(( w - 6 )))"
+    printf '│  %s  │\n' "$(tui_rep '─' $(( w - 6 )))"
+    vh=$(( lh - 9 )); [[ "$vh" -lt 5 ]] && vh=5
+    [[ "$sel" -lt "$off" ]] && off=$sel
+    [[ "$sel" -ge $(( off + vh )) ]] && off=$(( sel - vh + 1 ))
+    for ((i=off; i<off+vh && i<n; i++)); do
+      IFS='|' read -r domain label tier group desc <<< "${rows[$i]}"
+      if [[ "$mode" == "pick" ]]; then
+        [[ "${picked[$i]}" == "1" ]] && mark="[*]" || mark="[ ]"
+        line="$(printf '%-4s %-6s %-36s %s' "$mark" "$domain" "$label" "$desc")"
+      else
+        line="$(printf '%-5s %-6s %-40s %s' "$(tier_tag "$tier")" "$domain" "$label" "$desc")"
+      fi
+      if [[ "$i" == "$sel" ]]; then
+        printf '│  %s%s%s│\n' "${C_BG}${C_BOLD}" "$(tui_lpad " ${line} " $(( w - 4 )))" "${C_RST}"
+      elif [[ "$mode" == "pick" && "${picked[$i]}" == "1" ]]; then
+        printf '│  %s%s%s│\n' "${C_GRN}" "$(tui_lpad " ${line} " $(( w - 4 )))" "${C_RST}"
+      else
+        printf '│  %s%s%s│\n' "$(tier_color "$tier")" "$(tui_lpad " ${line} " $(( w - 4 )))" "${C_RST}"
+      fi
+    done
+    for ((; i<off+vh; i++)); do
+      printf '│  %s  │\n' "$(tui_lpad "" $(( w - 6 )))"
+    done
+    if [[ "$mode" == "pick" ]]; then
+      printf '│  %s  │\n' "$(tui_lpad " space mark/unmark   Enter apply ${marked}   q back " $(( w - 6 )))"
+    else
+      printf '│  %s  │\n' "$(tui_lpad " j/k or arrows scroll   q back " $(( w - 6 )))"
+    fi
+    printf '└%s┘\n' "$(tui_rep '─' $(( w - 2 )))"
+    key="$(tui_key)"
+    case "$key" in
+      UP|k|K)        sel=$(( sel > 0 ? sel - 1 : 0 )) ;;
+      DOWN|j|J)      sel=$(( sel + 1 < n ? sel + 1 : n - 1 )) ;;
+      " ")           [[ "$mode" == "pick" ]] && { if [[ "${picked[$sel]}" == "1" ]]; then picked[$sel]=0; marked=$((marked-1)); else picked[$sel]=1; marked=$((marked+1)); fi; } ;;
+      ENTER)         [[ "$mode" == "pick" ]] && break ;;
+      q|Q|ESC|EOF)   return 1 ;;
+      MOUSE*)        : ;;
+    esac
+  done
+  # confirmed: materialize the marked rows; danger tiers need the same gate as Mode 4
+  if [[ "$marked" == "0" ]]; then
+    printf '\033[2J\033[H'
+    printf '┌%s┐\n' "$(tui_rep '─' $(( w - 2 )))"
+    printf '│%s│\n' "$(tui_lpad ' Nothing marked. Press any key to go back.' $(( w - 2 )))"
+    printf '└%s┘\n' "$(tui_rep '─' $(( w - 2 )))"
+    tui_key >/dev/null
+    return 1
+  fi
+  : > "$SELECTED_TMP"
+  for ((i=0;i<n;i++)); do
+    [[ "${picked[$i]}" == "1" ]] && printf '%s\n' "${rows[$i]}" >> "$SELECTED_TMP"
+  done
+  if [[ "$DRY_RUN" != "1" ]]; then
+    for ((i=0;i<n;i++)); do
+      [[ "${picked[$i]}" != "1" ]] && continue
+      IFS='|' read -r _ _ tier _ <<< "${rows[$i]}"
+      [[ "$tier" == "3" || "$tier" == "4" ]] && risk=1
+    done
+    if [[ "$risk" == "1" ]]; then tui_danger_gate || return 1; fi
+  fi
+  return 0
+}
+
 tui_select_mode() { # loader -> danger gate (Mode 4) -> plan screen; sets TUI_DONE on confirm
   local count
   run_loader "Building plan for Mode $MODE" build_plan
@@ -1703,7 +1785,9 @@ silent_flow() {
 
 # ---- run ---------------------------------------------------------------------
 interactive_flow() {
-  : > "$SELECTED_TMP"
+  if [[ "$MANUAL_PICKED" != "1" ]]; then
+    : > "$SELECTED_TMP"
+  fi
   print_header
   mode_note
   echo ""
@@ -1711,7 +1795,7 @@ interactive_flow() {
     # Plan was already built and confirmed inside the TUI; reproduce the exact
     # same selection so what gets applied matches what was shown.
     build_plan
-  else
+  elif [[ "$MANUAL_PICKED" != "1" ]]; then
     select_by_mode
   fi
 
@@ -1726,7 +1810,7 @@ interactive_flow() {
   fi
 
   if [[ "$PLAN_OK" != "1" ]]; then
-    if [[ "$ASK_THERMAL" == "1" && "$MODE" != "4" ]]; then thermal_confirm; fi
+    if [[ "$ASK_THERMAL" == "1" && "$MODE" != "4" && "$MODE" != "0" ]]; then thermal_confirm; fi
 
     if [[ "$MODE" == "4" ]]; then
       if [[ "$DRY_RUN" == "1" ]]; then
@@ -1860,10 +1944,10 @@ fi
 # interactive_flow returns 1 when the user backs out (abort, nothing selected),
 # in which case we loop back to the menu instead of killing the session.
 while :; do
-  TUI_DONE=0; MODE=0; MANUAL_LABELS=""; PLAN_OK=0
+  TUI_DONE=0; MODE=0; MANUAL_LABELS=""; PLAN_OK=0; MANUAL_PICKED=0
   tui_main
 
-  [[ "$MODE" == "0" && -z "${MANUAL_LABELS// /}" ]] && break
+  [[ "$MODE" == "0" && -z "${MANUAL_LABELS// /}" && "$MANUAL_PICKED" == "0" ]] && break
 
   # destructive direction requires SIP off (dry-run is exempt)
   if [[ "$SIP_STATE" != "disabled" && "$DRY_RUN" == "0" ]]; then sip_block; fi
