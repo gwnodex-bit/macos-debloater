@@ -576,7 +576,7 @@ tier_color() {
 show_plan() {
   local domain label tier group desc
   log ""
-  log "${C_BOLD}Plan — $(count_picked) service(s) to disable:${C_RST}"
+  log "${C_BOLD}Plan - $(count_picked) service(s) to disable:${C_RST}"
   while IFS='|' read -r domain label tier group desc; do
     [[ -z "$label" ]] && continue
     printf "   ${C_CYN}%-6s${C_RST} $(tier_color "$tier")%-5s${C_RST} %-56s ${C_DIM}%s${C_RST}\n" "$domain" "$(tier_tag "$tier")" "$label" "$desc"
@@ -945,22 +945,22 @@ list_catalog() {
   local domain label tier group desc
   log "${C_BOLD}Catalog for ${OS_VER} (${HW_ARCH})${C_RST}"
   log ""
-  log "${C_GRN}Tier 1 — Safe${C_RST}"
+  log "${C_GRN}Tier 1 - Safe${C_RST}"
   while IFS='|' read -r domain label tier group desc; do
     [[ "$tier" == "1" ]] && printf "  ${C_CYN}%-6s${C_RST} %-56s ${C_DIM}%s${C_RST}\n" "$domain" "$label" "$desc"
   done < <(sort -u -t'|' -k1,1 -k2,2 "$RESOLVED_TMP")
   log ""
-  log "${C_YLW}Tier 2 — Balanced / Aggressive${C_RST}"
+  log "${C_YLW}Tier 2 - Balanced / Aggressive${C_RST}"
   while IFS='|' read -r domain label tier group desc; do
     [[ "$tier" == "2" ]] && printf "  ${C_CYN}%-6s${C_RST} %-56s ${C_DIM}%s${C_RST}\n" "$domain" "$label" "$desc"
   done < <(sort -u -t'|' -k4,4 -k1,1 -k2,2 "$RESOLVED_TMP")
   log ""
-  log "${C_RED}Tier 3 — Thermal (Mode 4)${C_RST}"
+  log "${C_RED}Tier 3 - Thermal (Mode 4)${C_RST}"
   while IFS='|' read -r domain label tier group desc; do
     [[ "$tier" == "3" ]] && printf "  ${C_CYN}%-6s${C_RST} ${C_BOLD}%-56s${C_RST} ${C_DIM}%s${C_RST}\n" "$domain" "$label" "$desc"
   done < <(sort -u -t'|' -k1,1 -k2,2 "$RESOLVED_TMP")
   log ""
-  log "${C_RED}${C_BOLD}Tier 4 — Dangerous extras (Mode 4)${C_RST}"
+  log "${C_RED}${C_BOLD}Tier 4 - Dangerous extras (Mode 4)${C_RST}"
   while IFS='|' read -r domain label tier group desc; do
     [[ "$tier" == "4" ]] && printf "  ${C_CYN}%-6s${C_RST} ${C_RED}%-56s${C_RST} ${C_DIM}%s${C_RST}\n" "$domain" "$label" "$desc"
   done < <(sort -u -t'|' -k1,1 -k2,2 "$RESOLVED_TMP")
@@ -969,23 +969,11 @@ list_catalog() {
 print_moon() {
   if [[ -t 1 ]]; then
     printf '%s\n' \
-      "${C_DIM}               ·                          ✧${C_RST}" \
-      "${C_YLW}     ✧                       .${C_RST}" \
-      "${C_CYN}                 ▄▄▄▄▓▓▄▄▄▄${C_RST}" \
-      "${C_CYN}       .       ▄▓▓▓██░░░░░░░▀▄${C_RST}" \
-      "${C_CYN}             ▄▓▓██░░░░░  ✧  ░░▀▄${C_RST}" \
-      "${C_CYN}            ▄▓██░░░░░  ✵      ░░▀▄${C_RST}" \
-      "${C_CYN}  ✧        ▄▓█░░░░░░            ░▐█▄${C_RST}" \
-      "${C_CYN}           ▐█▌░░░░░░            ░░██${C_RST}" \
-      "${C_CYN}            ▀█▄░░░░░          ░░▄█▀${C_RST}" \
-      "${C_CYN}             ▀██▄░░░░░      ░░▄█▀${C_RST}" \
-      "${C_CYN}      .        ▀▀████▓▄▄▄▄▄██▀▀${C_RST}" \
-      "${C_MAG}                 ✧            ✦${C_RST}" \
-      "${C_DIM}        ·                        ✧${C_RST}" \
+      "${C_BOLD}${C_MAG}   macos-debloater${C_RST}" \
+      "${C_DIM}   debloat + optimize, mode 1-4.${C_RST}" \
       ""
-    printf '%s\n' "${C_BOLD}${C_MAG}   m a c o s - d e b l o a t e r${C_RST}"
   else
-    printf '%s\n' "${C_BOLD}macos-debloater${C_RST} — debloat + optimize, mode 1-4."
+    printf '%s\n' "${C_BOLD}macos-debloater${C_RST} - debloat + optimize, mode 1-4."
   fi
 }
 
@@ -995,35 +983,35 @@ print_header() {
   if [[ "$DRY_RUN" == "1" ]]; then drun="${C_GRN}yes${C_RST}"; else drun="${C_YLW}no${C_RST}"; fi
   echo ""
   printf '%s\n' "${C_BOLD}${C_MAG}${SCRIPT_NAME}${C_RST}${C_BOLD} v${VERSION}${C_RST}   ${C_CYN}${OS_VER}${C_RST}"
-  echo "${C_DIM}──────────────────────────────────────────────────────────${C_RST}"
+  echo "${C_DIM}----------------------------------------------------------${C_RST}"
   echo "  Host    ${C_CYN}${HW_NAME} (${HW_ARCH})${C_RST}"
   echo "  CPU     ${C_CYN}${CPU_BRAND}${C_RST}"
   echo "  RAM     ${C_CYN}${MEM_GB} GB${C_RST}"
   echo "  OS      ${C_CYN}${OS_VER}${C_RST}"
   printf '%s\n' "  SIP     ${sipc}${SIP_STATE}${C_RST}"
-  printf '%s\n' "  Scope   ${C_CYN}root · ${USER_COUNT} user account(s)${C_RST}"
+  printf '%s\n' "  Scope   ${C_CYN}root - ${USER_COUNT} user account(s)${C_RST}"
   printf '%s\n' "  Dry-run ${drun}"
-  echo "${C_DIM}──────────────────────────────────────────────────────────${C_RST}"
+  echo "${C_DIM}----------------------------------------------------------${C_RST}"
   config_summary
 }
 
 mode_note() {
   case "$MODE" in
     1)
-      log "${C_GRN}${C_BOLD}Mode 1 — Safe${C_RST}"
+      log "${C_GRN}${C_BOLD}Mode 1 - Safe${C_RST}"
       log "  Services: telemetry, analytics, diagnostics, Siri/Apple-Intelligence."
       log "  Optimizations: window/dock animations, save dialogs, file extensions,"
       log "  no .DS_Store on network/USB volumes."
       ;;
     2)
-      log "${C_YLW}${C_BOLD}Mode 2 — Balanced${C_RST}"
+      log "${C_YLW}${C_BOLD}Mode 2 - Balanced${C_RST}"
       log "  Services: Mode 1 + iCloud extras, Maps, media extras, App Store,"
       log "  network sharing services. Some features lost."
       log "  Optimizations: Mode 1 + spring-loading off, transparency off,"
       log "  Time Machine auto-disk prompt off, power nap off."
       ;;
     3)
-      log "${C_BLU}${C_BOLD}Mode 3 — Aggressive${C_RST}"
+      log "${C_BLU}${C_BOLD}Mode 3 - Aggressive${C_RST}"
       log "  Services: Mode 2 + Spotlight, Find My, Location, Messages, FaceTime,"
       log "  Handoff/AirDrop/AirPlay, Screen Sharing, Time Machine, Photos, Wallet,"
       log "  Screen Time, Family. Many features lost."
@@ -1031,7 +1019,7 @@ mode_note() {
       log "  Spotlight indexing off (mdutil)."
       ;;
     4)
-      log "${C_RED}${C_BOLD}Mode 4 — Dangerous${C_RST}"
+      log "${C_RED}${C_BOLD}Mode 4 - Dangerous${C_RST}"
       log "  Services: Mode 3 + thermal daemon + App Store, Mail, Contacts,"
       log "  crash/spin reporting, screenshot UI, live transcription."
       log "  Optimizations: Mode 3 + crash dialogs off, wake-on-lan off,"
@@ -1146,7 +1134,7 @@ tui_draw() {
   if [[ "$SIP_STATE" == "disabled" ]]; then sipc="${C_GRN}"; elif [[ "$SIP_STATE" == "enabled" ]]; then sipc="${C_RED}"; else sipc="${C_YLW}"; fi
   printf '\033[?25l\033[2J\033[H'
   printf '%s\n' "${C_BOLD}${C_MAG}${SCRIPT_NAME}${C_RST}${C_BOLD} v${VERSION}${C_RST}   ${C_CYN}${OS_VER}${C_RST}   ${sipc}SIP ${SIP_STATE}${C_RST}   ${C_YLW}${USER_COUNT} user(s)${C_RST}"
-  echo "${C_DIM}──────────────────────────────────────────────────────────────────${C_RST}"
+  echo "${C_DIM}------------------------------------------------------------------${C_RST}"
   for ((i=0;i<n;i++)); do
     plain="$(tui_row_plain "$i")"
     text="$(tui_crop "$plain" $(( COLS - 6 )))"
@@ -1166,8 +1154,8 @@ tui_draw() {
       printf '    %s%s%s\n' "$modec" "$text" "${C_RST}"
     fi
   done
-  echo "${C_DIM}──────────────────────────────────────────────────────────────────${C_RST}"
-  echo "  ↑/↓ or j/k move   Enter or click choose   1-4 jump   wheel scrolls   q quit"
+  echo "${C_DIM}------------------------------------------------------------------${C_RST}"
+  echo "  up/down or j/k move   Enter or click choose   1-4 jump   wheel scrolls   q quit"
 }
 
 tui_pause() { printf '%s' "Press any key to return to the menu"; IFS='' read -r -s -n1; }
@@ -1216,7 +1204,7 @@ tui_exec() {
       tui_screen_off
       [[ -n "$STTY_SAVED" ]] && stty "$STTY_SAVED" 2>/dev/null
       echo ""
-      echo "${C_BOLD}Custom services${C_RST} — type label(s) to disable (comma or space separated)."
+      echo "${C_BOLD}Custom services${C_RST} - type label(s) to disable (comma or space separated)."
       echo "Example: com.apple.weatherd com.apple.newsd"
       echo ""
       read -r -p "Labels: " CUSTOM_LABELS
@@ -1290,12 +1278,12 @@ thermal_confirm() {
 
 dangerous_gate() {
   echo ""
-  echo "${C_RED}${C_BOLD}WARNING 1 — DANGEROUS MODE${C_RST}"
+  echo "${C_RED}${C_BOLD}WARNING 1 - DANGEROUS MODE${C_RST}"
   echo "Disables the thermal daemon (overheating / possible laptop damage) and a"
   echo "large extra set of services. It still boots. Most optional services off."
   ask_yes "${C_RED}Are you sure? (1/2)${C_RST}" || { warn "aborted."; exit 0; }
   echo ""
-  echo "${C_RED}${C_BOLD}WARNING 2 — REALLY SURE?${C_RST}"
+  echo "${C_RED}${C_BOLD}WARNING 2 - REALLY SURE?${C_RST}"
   echo "Thermal protection stays off and many features stop working until you run"
   echo "Restore / Restore all from the menu."
   ask_yes "${C_RED}Are you REALLY sure? (2/2)${C_RST}" || { warn "aborted."; exit 0; }
@@ -1363,7 +1351,7 @@ silent_flow() {
   fi
 
   take_snapshot
-  log "${C_BOLD}Disabling services…${C_RST}"
+  log "${C_BOLD}Disabling services...${C_RST}"
   apply_selection
   apply_tweaks "$MODE"
   sysctl_persist
@@ -1412,7 +1400,7 @@ interactive_flow() {
     reboot_prompt
   else
     take_snapshot
-    log "${C_BOLD}Disabling services…${C_RST}"
+    log "${C_BOLD}Disabling services...${C_RST}"
     apply_selection
     apply_tweaks "$MODE"
     sysctl_persist
@@ -1433,7 +1421,7 @@ kernel_confirm() {
   log "${C_BOLD}Safe sleep / hibernation${C_RST}"
   log "  hibernatemode 0 stops writing the RAM-sized sleepimage on every sleep"
   log "  (saves SSD space + write wear). Risk: no disk fallback if the battery"
-  log "  drains completely while asleep — unsaved work is lost."
+  log "  drains completely while asleep - unsaved work is lost."
   if ask_yes "Disable safe sleep (hibernatemode 0 + delete sleepimage)? [y/N]"; then
     HIBERNATE_OFF=1
     ok "hibernation will be disabled."
@@ -1442,7 +1430,7 @@ kernel_confirm() {
     info "safe sleep kept."
   fi
 
-  # 2) FileVault: research says hardware-accelerated on Apple Silicon (≈free).
+  # 2) FileVault: research says hardware-accelerated on Apple Silicon (~free).
   echo ""
   log "${C_BOLD}FileVault${C_RST}"
   st="$(fdesetup status 2>/dev/null | tr -d '\n')"
@@ -1463,7 +1451,7 @@ kernel_confirm() {
       info "FileVault kept enabled (recommended)."
     fi
   else
-    info "FileVault is already OFF — nothing to do."
+    info "FileVault is already OFF - nothing to do."
   fi
 
   # 3) Network buffers: ESnet tuning is for wired 1Gbps+; degrades Wi-Fi.
