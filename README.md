@@ -20,10 +20,6 @@
 
 </div>
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/xscope0/macos-debloater/main/install.sh | bash
-macos-debloater
-```
 
 One script. No daemon, no account, no telemetry. It turns services off the same way `launchctl disable` does, and it can undo everything it does.
 
