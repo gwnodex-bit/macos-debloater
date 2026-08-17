@@ -8,6 +8,7 @@
 # nothing is run except the installer itself.
 set -u
 
+tmp=""   # global: the EXIT trap must see it even after main() returns
 REPO_URL="${REPO_URL:-https://raw.githubusercontent.com/xscope0/macos-debloater/main}"
 SRC="$REPO_URL/macos-debloater.sh"
 DEST="${DEST:-/usr/local/bin/macos-debloater}"
@@ -48,56 +49,87 @@ show_banner() {
   fi
 }
 
-spinner() { # $1 = pid to watch
-  local pid="$1" frames=('|' '/' '-' '\') i=0
-  while kill -0 "$pid" 2>/dev/null; do
-    printf '\r  %s  Fetching macos-debloater.sh ...' "${frames[$i]}"
-    i=$(( (i + 1) % 4 ))
-    sleep 0.1
-  done
-  printf '\r'
-  printf '%*s\r' 40 ""
+# Single-line progress bar: [████████░░░░]  63%  label
+bar() { # width pct -> block string
+  local w="$1" pct="$2" i s="" filled
+  [[ "$pct" -gt 100 ]] && pct=100
+  [[ "$pct" -lt 0 ]] && pct=0
+  filled=$(( pct * w / 100 ))
+  for ((i=0;i<filled;i++)); do s+="█"; done
+  for ((i=filled;i<w;i++)); do s+="░"; done
+  printf '%s' "$s"
+}
+
+progress() { # pct label
+  local pct="$1" label="$2"
+  if [[ -t 1 ]]; then
+    printf '\r  [%s] %3d%%  %s' "$(bar 24 "$pct")" "$pct" "$label"
+  else
+    printf '  %s\n' "$label"
+  fi
 }
 
 main() {
+  local size cpid got pct t0
   tmp="$(mktemp /tmp/macos-debloater.XXXXXX)" || exit 1
-  trap 'rm -f "$tmp"' EXIT
+  trap 'rm -f "$tmp"' EXIT   # tmp is global so the EXIT trap can see it
 
   show_banner
   # printf %b so the DIM/RST escape codes are interpreted, not printed raw.
   printf '%b\n' "${DIM}  installing from $REPO_URL${RST}"
   echo ""
 
+  # Best-effort content-length for a real download bar; falls back to a
+  # time-based animation when the server doesn't report one.
+  size=$(curl -fsSLI "$SRC" 2>/dev/null | awk 'tolower($1)=="content-length:"{print $2}' | tr -d '\r')
+  [[ "$size" =~ ^[0-9]+$ ]] || size=0
+
   curl -fsSL "$SRC" -o "$tmp" 2>/dev/null &
-  local cpid=$!
-  spinner "$cpid"
+  cpid=$!
+  t0=$(date +%s)
+  while kill -0 "$cpid" 2>/dev/null; do
+    if [[ "$size" -gt 0 ]]; then
+      got=$(wc -c < "$tmp" 2>/dev/null || echo 0)
+      pct=$(( got * 100 / size ))
+      [[ "$pct" -gt 88 ]] && pct=88   # leave the tail for verify/install
+    else
+      pct=$(( ( $(date +%s) - t0 ) * 12 ))
+      [[ "$pct" -gt 88 ]] && pct=88
+    fi
+    progress "$pct" "downloading"
+    sleep 0.08
+  done
   wait "$cpid" || {
+    printf '\n'
     echo "  ERROR: could not download $SRC" >&2
     echo "  Check the URL, your network, or set REPO_URL to a mirror." >&2
     exit 1
   }
-  printf '%b\n' "${GRN}  OK${RST}  downloaded macos-debloater.sh ($(wc -c < "$tmp") bytes)"
 
+  progress 92 "verifying"
   if ! grep -q 'macos-debloater' "$tmp" || ! bash -n "$tmp" 2>/dev/null; then
+    printf '\n'
     echo "  ERROR: downloaded file is not a valid macos-debloater script." >&2
     echo "  Refusing to install a possibly-corrupt or tampered file." >&2
     exit 1
   fi
-  printf '%b\n' "${GRN}  OK${RST}  verified (valid bash, macos-debloater)"
 
   if [[ ! -d "$(dirname "$DEST")" ]]; then
+    printf '\n'
     echo "  ERROR: $(dirname "$DEST") does not exist; set DEST to a writable bin dir." >&2
     exit 1
   fi
 
   if [[ -w "$(dirname "$DEST")" ]]; then
-    install -m 0755 "$tmp" "$DEST" || { echo "  ERROR: install failed." >&2; exit 1; }
+    progress 96 "installing"
+    install -m 0755 "$tmp" "$DEST" || { printf '\n'; echo "  ERROR: install failed." >&2; exit 1; }
   else
-    echo "  (elevating: $(dirname "$DEST") needs root)"
-    sudo install -m 0755 "$tmp" "$DEST" || { echo "  ERROR: install failed (sudo)." >&2; exit 1; }
+    progress 96 "installing (needs root)"
+    sudo install -m 0755 "$tmp" "$DEST" || { printf '\n'; echo "  ERROR: install failed (sudo)." >&2; exit 1; }
   fi
-  printf '%b\n' "${GRN}  OK${RST}  installed: $DEST"
-  echo ""
+
+  progress 100 "done"
+  printf '\n\n'
   echo "  Run it (will auto-elevate with sudo):"
   printf '%b\n' "${GRN}  macos-debloater${RST}"
   echo ""

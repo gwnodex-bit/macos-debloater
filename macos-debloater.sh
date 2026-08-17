@@ -12,7 +12,7 @@ if [ -z "${BASH_VERSION:-}" ]; then
   exec /bin/bash "$0" "$@"
 fi
 set -u
-VERSION="1.3.5"
+VERSION="1.3.6"
 SCRIPT_NAME="macos-debloater"
 
 # Root-only by design (enterprise / fleet): state is system-wide under
@@ -1333,7 +1333,7 @@ tui_draw() {
   # footer: keys + state (plain text - colors inside a padded line break alignment)
   if [[ "$DRY_RUN" == "1" ]]; then dry="ON"; else dry="off"; fi
   if [[ "$ASK_THERMAL" == "1" ]]; then thm="ON"; else thm="off"; fi
-  printf '│  %s  │\n' "$(tui_lpad "↑/↓ or j/k  Enter select  1-4 jump  q quit  Dry-run: ${dry}  Thermal: ${thm}" $(( w - 6 )))"
+  printf '│  %s  │\n' "$(tui_lpad "↑/↓ or j/k move   Enter select   1-4 jump   q quit    Dry-run: ${dry}  Thermal: ${thm}" $(( w - 6 )))"
   [[ -f "$CONFIG_FILE" ]] && printf '│  %s  │\n' "$(tui_lpad "config $CONFIG_FILE pre-sets values" $(( w - 6 )))"
   printf '└%s┘\n' "$(tui_rep '─' $(( w - 2 )))"
 }
@@ -1342,6 +1342,24 @@ tui_pause() {
   printf '\nPress any key to return to the menu'
   IFS='' read -r -s -n1
   echo ""
+}
+
+tui_confirm() { # title detail -> Enter confirms (0), q cancels (1)
+  local title="$1" detail="$2" w="${COLS:-80}" key
+  while :; do
+    printf '\033[2J\033[H'
+    tui_topbar " $title " " ${C_YLW}${C_BOLD}$title${C_RST} " "$w"; echo ""
+    printf '│  %s  │\n' "$(tui_lpad " $detail " $(( w - 6 )))"
+    printf '│  %s  │\n' "$(tui_lpad "" $(( w - 6 )))"
+    printf '│  %s  │\n' "$(tui_lpad " Enter confirm   q cancel " $(( w - 6 )))"
+    printf '└%s┘\n' "$(tui_rep '─' $(( w - 2 )))"
+    key="$(tui_key)"
+    case "$key" in
+      ENTER)   return 0 ;;
+      q|Q|ESC|EOF) return 1 ;;
+      MOUSE*)  : ;;
+    esac
+  done
 }
 
 tui_exec() {
@@ -1372,18 +1390,21 @@ tui_exec() {
       fi
       ;;
     restore)
+      tui_confirm "Restore last run" "Re-enable the services disabled by the last run." || return
       tui_screen_off
       restore_from_manifest
       tui_pause
       tui_screen_on
       ;;
     restorefeat)
+      tui_confirm "Restore features" "Undo the defaults/pmset/Spotlight tweaks back to the saved values." || return
       tui_screen_off
       restore_optimizations
       tui_pause
       tui_screen_on
       ;;
     restoreall)
+      tui_confirm "Restore all" "Re-enable every catalog entry, regardless of what ran." || return
       tui_screen_off
       restore_all_catalog
       tui_pause
@@ -1430,10 +1451,10 @@ tui_main() {
       UP|k|K)      TUI_SEL=$(( (TUI_SEL - 1 + ${#TUI_ITEMS[@]}) % ${#TUI_ITEMS[@]} )) ;;
       DOWN|j|J)    TUI_SEL=$(( (TUI_SEL + 1) % ${#TUI_ITEMS[@]} )) ;;
       ENTER)       tui_exec ;;
-      1)           TUI_SEL=0; tui_exec ;;
-      2)           TUI_SEL=1; tui_exec ;;
-      3)           TUI_SEL=2; tui_exec ;;
-      4)           TUI_SEL=3; tui_exec ;;
+      1)           TUI_SEL=0 ;;   # jump selects the row; Enter still executes
+      2)           TUI_SEL=1 ;;
+      3)           TUI_SEL=2 ;;
+      4)           TUI_SEL=3 ;;
       MOUSE*)      mouse_handle "$key" ;;
       q|Q|ESC|EOF|"") MODE=0; TUI_DONE=1 ;;
     esac
