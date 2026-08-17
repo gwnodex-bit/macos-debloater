@@ -9,7 +9,7 @@
 ╚═╝      ╚═════╝  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝
 </pre>
 
-**Turn off the macOS services you don't use. All of them, or just the safe ones — your call, from a menu.**
+**Fuck off the macOS services you don't use. Fuck all of em, or just the safe ones — your call, from a menu.**
 
 <a href="macos-debloater.sh"><img src="https://img.shields.io/badge/macOS-12%20%E2%80%93%2026-000000?logo=apple&logoColor=white&style=for-the-badge" alt="macOS 12-26"/></a>
 <a href="macos-debloater.sh"><img src="https://img.shields.io/badge/Shell-Bash-4EAA25?logo=gnubash&logoColor=white&style=for-the-badge" alt="Bash"/></a>
@@ -216,7 +216,7 @@ The script only acts on an entry if the plist resolves on the running macOS — 
 
 ---
 
-## 🧪 Development
+##  DIY
 
 ```bash
 git clone https://github.com/xscope0/macos-debloater.git
