@@ -1,26 +1,35 @@
-```
+<div align="center">
+
+<pre>
 ███████╗██╗   ██╗ ██████╗██╗  ██╗ █████╗ ███████╗██╗     ██████╗
 ██╔════╝██║   ██║██╔════╝██║ ██╔╝██╔══██╗██╔════╝██║     ██╔══██╗
 █████╗  ██║   ██║██║     █████╔╝ ███████║███████╗██║     ██████╔╝
 ██╔══╝  ██║   ██║██║     ██╔═██╗ ██╔══██║╚════██║██║     ██╔══██╗
 ██║     ╚██████╔╝╚██████╗██║  ██╗██║  ██║███████║███████╗██║  ██║
 ╚═╝      ╚═════╝  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝
-```
+</pre>
 
-# macos-debloater
+**Turn off the macOS services you don't use. All of them, or just the safe ones — your call, from a menu.**
 
-Turn off the macOS services you don't use. All of them, or just the safe ones — your call, from a menu.
+<a href="macos-debloater.sh"><img src="https://img.shields.io/badge/macOS-12%20%E2%80%93%2026-000000?logo=apple&logoColor=white&style=for-the-badge" alt="macOS 12-26"/></a>
+<a href="macos-debloater.sh"><img src="https://img.shields.io/badge/Shell-Bash-4EAA25?logo=gnubash&logoColor=white&style=for-the-badge" alt="Bash"/></a>
+<a href="macos-debloater.sh"><img src="https://img.shields.io/badge/Telemetry-None-2ea44f?style=for-the-badge" alt="No telemetry"/></a>
+<a href="macos-debloater.sh"><img src="https://img.shields.io/badge/Root-only-important?style=for-the-badge" alt="Root only"/></a>
+<a href="macos-debloater.sh"><img src="https://img.shields.io/badge/Modes-1%20%E2%80%93%204-orange?style=for-the-badge" alt="Modes 1-4"/></a>
+<a href="macos-debloater.sh"><img src="https://img.shields.io/badge/Enterprise-MDM%20ready-5865F2?style=for-the-badge" alt="Enterprise MDM ready"/></a>
 
-One script. No agent, no daemon, no account, no telemetry. It writes to the launchd disabled database, exactly the way `launchctl disable` does it, and it can undo everything it does.
+</div>
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/xscope0/macos-debloater/main/install.sh | bash
 macos-debloater
 ```
 
+One script. No agent, no daemon, no account, no telemetry. It writes to the launchd disabled database, exactly the way `launchctl disable` does it, and it can undo everything it does.
+
 ---
 
-## What it actually does
+## ⚡ What it does
 
 macOS starts ~200 background services on every boot. Most of them exist to phone home, sync, index, or wait for a feature you never open. This script disables the ones you choose, by writing the same XPC disabled database that `launchctl disable` writes. Nothing under `/System` is touched. No plist is deleted. Every change is one command away from being undone.
 
@@ -30,49 +39,49 @@ It also applies the optimization tweaks that are safe enough to ship: window and
 
 ---
 
-## Modes
+## 🧰 Modes
 
 | Mode | Services disabled | What you lose | Risk |
 |---|---|---|---|
-| 1 · Safe | 65 | Telemetry, analytics, diagnostics, Siri and Apple Intelligence backends | None user-facing. Reversible. |
-| 2 · Balanced | 105 | Mode 1 + iCloud extras, Maps, media extras, App Store, network-sharing services | Some features. Reversible. |
-| 3 · Aggressive | 152 | Mode 2 + Spotlight, Find My, Messages, FaceTime, AirDrop/AirPlay, Screen Sharing, Time Machine, Photos, Wallet, Screen Time | Many features. Reversible. |
-| 4 · Dangerous | 198 | Mode 3 + the thermal daemon, App Store, Mail, Contacts, crash reporting, live transcription | Real. Double-confirmed before applying. |
+| ✅ 1 · Safe | 65 | Telemetry, analytics, diagnostics, Siri and Apple Intelligence backends | None user-facing. Reversible. |
+| ⚖️ 2 · Balanced | 105 | Mode 1 + iCloud extras, Maps, media extras, App Store, network-sharing services | Some features. Reversible. |
+| 🔥 3 · Aggressive | 152 | Mode 2 + Spotlight, Find My, Messages, FaceTime, AirDrop/AirPlay, Screen Sharing, Time Machine, Photos, Wallet, Screen Time | Many features. Reversible. |
+| ☠️ 4 · Dangerous | 198 | Mode 3 + the thermal daemon, App Store, Mail, Contacts, crash reporting, live transcription | Real. Double-confirmed before applying. |
 
 Counts are the resolved plan for macOS Sequoia (15.x), measured by the script itself on a real install — they vary slightly by OS version because every entry must resolve to a plist that actually exists before it's touched.
 
-The catalog has 201 entries across four risk tiers. Every entry is a real launchd label with a description, and every one must resolve to a plist on *your* macOS before the script will touch it.
+The catalog has **201 entries** across four risk tiers. Every entry is a real launchd label with a description, and every one must resolve to a plist on *your* macOS before the script will touch it.
 
 ---
 
-## How you use it
+## 🖥️ How you use it
 
 Everything lives in one TUI. No flags, no arguments, nothing to remember:
 
-- **Pick a mode** — Safe through Dangerous. The plan is printed before anything happens.
-- **Dry-run** — toggle it on and every command is shown without being executed. This works even with SIP enabled.
-- **Custom** — type specific labels (`com.apple.weatherd com.apple.newsd`) and only those get disabled.
-- **List** — print the full catalog for your exact macOS version.
-- **Restore** — undo the last run, restore the defaults/pmset/Spotlight tweaks, or re-enable every catalog entry. Restore needs no network and no account.
+- **🎯 Pick a mode** — Safe through Dangerous. The plan is printed before anything happens.
+- **👁️ Dry-run** — toggle it on and every command is shown without being executed. This works even with SIP enabled.
+- **✏️ Custom** — type specific labels (`com.apple.weatherd com.apple.newsd`) and only those get disabled.
+- **📋 List** — print the full catalog for your exact macOS version.
+- **↩️ Restore** — undo the last run, restore the defaults/pmset/Spotlight tweaks, or re-enable every catalog entry. Restore needs no network and no account.
 
 Two safety rails sit under the whole thing:
 
-1. **A hard deny list.** Boot-critical services — `com.apple.WindowServer`, `com.apple.loginwindow`, and friends — are refused even if you type them by hand.
-2. **Snapshot before change.** Every run writes the current disabled database and every optimization's old value to `/Library/Application Support/macos-debloater/backups/` before touching anything.
+1. **🛡️ A hard deny list.** Boot-critical services — `com.apple.WindowServer`, `com.apple.loginwindow`, and friends — are refused even if you type them by hand.
+2. **📸 Snapshot before change.** Every run writes the current disabled database and every optimization's old value to `/Library/Application Support/macos-debloater/backups/` before touching anything.
 
 ### Requirements
 
-- **Root.** The script auto-elevates with `sudo`. State is system-wide and covers every user account on the machine in one run.
-- **SIP disabled** for real runs (dry-run, list, and restore work regardless). The menu has a SIP help item with the Recovery-mode steps and a video link.
-- macOS 12, 13, 14, 15, or 26. Anything else is refused at startup.
+- **👑 Root.** The script auto-elevates with `sudo`. State is system-wide and covers every user account on the machine in one run.
+- **🔓 SIP disabled** for real runs (dry-run, list, and restore work regardless). The menu has a SIP help item with the Recovery-mode steps and a video link.
+- **🍎 macOS 12, 13, 14, 15, or 26.** Anything else is refused at startup.
 
 ---
 
-## Enterprise / fleet
+## 🏢 Enterprise / fleet
 
 The same script is the fleet tool. IT pre-seeds a config file and the script applies silently — no TUI, no prompts:
 
-```
+```ini
 # /Library/Application Support/macos-debloater/config
 MODE=2
 DRY_RUN=0
@@ -80,8 +89,6 @@ AUTO_APPLY=1
 ```
 
 Deploy with MDM: push the config, run `macos-debloater` once per machine. The config file *is* the authorization — its existence and contents replace every confirmation prompt, which is exactly why the dangerous keys (`HIBERNATE_OFF`, `FILEVAULT_DISABLE`, `NETWORK_TUNING`, `ASK_THERMAL`) default to off and have to be set deliberately.
-
-Supported keys:
 
 | Key | Default | Effect |
 |---|---|---|
@@ -98,37 +105,37 @@ When run as root, one run covers **every user account** — gui-domain services 
 
 ---
 
-## The bits that need a warning label
+## ⚠️ The bits that need a warning label
 
 These are in the script, they work, and they each carry a printed warning before they run. Read them once:
 
-- **Thermal daemon (Mode 4, and Mode 4 only by default).** `com.apple.thermalmonitord` on Apple Silicon, `com.apple.thermald` on Intel. Disabling it removes the CPU's thermal throttling. The machine still boots — it can also overheat. On a laptop, that's permanent hardware damage territory. You must type `YES`, not just `y`, to include it.
-- **Hibernation off (Mode 4, opt-in).** `hibernatemode 0` stops writing the RAM-sized sleepimage on sleep. Saves SSD space and write wear. If the battery drains completely while asleep, unsaved work is gone — there's no disk fallback.
-- **FileVault off (Mode 4, opt-in).** On Apple Silicon the encryption is hardware-accelerated, so the speed gain is roughly zero and you lose whole-disk encryption. There's also a documented FileVault boot-loop bug on 12.3 multi-volume setups. The script tells you this, then asks again.
-- **Network buffer tuning (Mode 4, opt-in).** The ESnet values (`win_scale_factor 8`, 32 MB autotune buffers) are for wired 1Gbps+ links. On Wi-Fi they can *reduce* throughput.
-- **`debug.lowpri_throttle_enabled=0` (Mode 3+).** Removes the background-task CPU throttle. Real latency win; costs some heat. It's a sysctl — it reverts on reboot, and the script also records and restores the old value.
+- **🌡️ Thermal daemon (Mode 4, and Mode 4 only by default).** `com.apple.thermalmonitord` on Apple Silicon, `com.apple.thermald` on Intel. Disabling it removes the CPU's thermal throttling. The machine still boots — it can also overheat. On a laptop, that's permanent hardware damage territory. You must type `YES`, not just `y`, to include it.
+- **💤 Hibernation off (Mode 4, opt-in).** `hibernatemode 0` stops writing the RAM-sized sleepimage on sleep. Saves SSD space and write wear. If the battery drains completely while asleep, unsaved work is gone — there's no disk fallback.
+- **🔐 FileVault off (Mode 4, opt-in).** On Apple Silicon the encryption is hardware-accelerated, so the speed gain is roughly zero and you lose whole-disk encryption. There's also a documented FileVault boot-loop bug on 12.3 multi-volume setups. The script tells you this, then asks again.
+- **🌐 Network buffer tuning (Mode 4, opt-in).** The ESnet values (`win_scale_factor 8`, 32 MB autotune buffers) are for wired 1Gbps+ links. On Wi-Fi they can *reduce* throughput.
+- **⚙️ `debug.lowpri_throttle_enabled=0` (Mode 3+).** Removes the background-task CPU throttle. Real latency win; costs some heat. It's a sysctl — it reverts on reboot, and the script also records and restores the old value.
 
 Kernel settings applied in a run are re-applied at boot by a generated LaunchDaemon (`/Library/LaunchDaemons/com.macos-debloater.sysctl.plist`) and removed on restore. That's the persistence mechanism, and it's the documented reason the script does not use `/etc/sysctl.conf` — macOS 15+ (SIP intact) doesn't reliably load it.
 
 ---
 
-## What you should *not* do
+## 🚫 What you should *not* do
 
 The research that built this script (full notes in [RESEARCH.md](RESEARCH.md)) turned up a short list of "optimizations" that break machines. They are deliberately **not** in the script:
 
-- **Disabling swap or memory compression.** `vm.compressor_mode` / swap-off causes kernel panics under memory pressure. The "you can reclaim GBs of RAM" claim is the single most dangerous piece of debloat lore on the internet. Not in here.
-- **`kern.maxfiles` sysctls.** Already ~300k on modern macOS. The real fix for "too many open files" is per-process via `launchctl limit maxfiles`, which the script does (65536/131072).
-- **Deleting launchd plists.** The script never deletes a plist. Deleting plists is what actually bricks boot; `launchctl disable` is the reversible path.
+- **💥 Disabling swap or memory compression.** `vm.compressor_mode` / swap-off causes kernel panics under memory pressure. The "you can reclaim GBs of RAM" claim is the single most dangerous piece of debloat lore on the internet. Not in here.
+- **🔧 `kern.maxfiles` sysctls.** Already ~300k on modern macOS. The real fix for "too many open files" is per-process via `launchctl limit maxfiles`, which the script does (65536/131072).
+- **🗑️ Deleting launchd plists.** The script never deletes a plist. Deleting plists is what actually bricks boot; `launchctl disable` is the reversible path.
 
 ---
 
-## Install
+## 🚀 Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/xscope0/macos-debloater/main/install.sh | bash
 ```
 
-The installer downloads `macos-debloater.sh` from this repo, verifies it's a valid bash script, installs it to `/usr/local/bin`, and stops. It doesn't run the debloater, doesn't phone home, and doesn't leave anything behind except the script.
+The installer prints the banner, downloads `macos-debloater.sh` from this repo with a live spinner, verifies it's a valid bash script, and installs it to `/usr/local/bin` (auto-elevating with sudo when needed). It doesn't run the debloater, doesn't phone home, and doesn't leave anything behind except the script.
 
 Uninstall is deleting one file:
 
@@ -138,7 +145,7 @@ sudo rm /usr/local/bin/macos-debloater
 
 ---
 
-## Repository structure
+## 📦 Repository structure
 
 ```
 macos-debloater/
@@ -148,7 +155,7 @@ macos-debloater/
 └── RESEARCH.md             sources + risk analysis behind the risky modes
 ```
 
-### Inside `macos-debloater.sh`
+### 🗂️ Inside `macos-debloater.sh`
 
 A single bash script, sections in order:
 
@@ -170,7 +177,7 @@ macos-debloater.sh
 └── main                   load_config -> TUI (or silent) -> SIP gate -> apply
 ```
 
-### Runtime state (written when you run it)
+### 💾 Runtime state (written when you run it)
 
 ```
 /Library/Application Support/macos-debloater/
@@ -188,11 +195,11 @@ macos-debloater.sh
     /Library/LaunchDaemons/com.macos-debloater.sysctl.plist
 ```
 
-### The catalog format
+### 🏷️ The catalog format
 
 Each line in `CATALOG`:
 
-```
+```ini
 com.apple.somethingd|gui|2|cloud|12|What it does, honestly
 ```
 
@@ -207,7 +214,9 @@ com.apple.somethingd|gui|2|cloud|12|What it does, honestly
 
 The script only acts on an entry if the plist resolves on the running macOS — a wrong guess degrades to "skipped," never to "disabled something important."
 
-## Development
+---
+
+## 🧪 Development
 
 ```bash
 git clone https://github.com/xscope0/macos-debloater.git

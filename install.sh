@@ -21,16 +21,30 @@ BANNER='███████╗██╗   ██╗ ██████╗█�
 
 MAG='\033[35m'; GRN='\033[32m'; DIM='\033[2m'; RST='\033[0m'
 
+# Center a line in the terminal width (banner lines are 66 chars wide).
+center() {
+  local line="$1" cols pad
+  cols="${COLUMNS:-$(tput cols 2>/dev/null)}"
+  [[ -z "$cols" || ! "$cols" =~ ^[0-9]+$ ]] && cols=80
+  [[ "$cols" -lt 70 ]] && cols=70
+  pad=$(( (cols - 66) / 2 ))
+  [[ "$pad" -lt 0 ]] && pad=0
+  printf '%*s%s\n' "$pad" "" "$line"
+}
+
 show_banner() {
+  local line
   if [[ -t 1 ]]; then
-    local line
     while IFS= read -r line; do
-      printf '%b%s%b\n' "$MAG" "$line" "$RST"
+      printf '%b' "$MAG"
+      center "$line"
+      printf '%b' "$RST"
       sleep 0.03
     done <<< "$BANNER"
     echo ""
   else
-    printf '%s\n\n' "$BANNER"
+    while IFS= read -r line; do center "$line"; done <<< "$BANNER"
+    echo ""
   fi
 }
 
