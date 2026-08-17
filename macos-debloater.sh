@@ -12,7 +12,7 @@ if [ -z "${BASH_VERSION:-}" ]; then
   exec /bin/bash "$0" "$@"
 fi
 set -u
-VERSION="1.3.1"
+VERSION="1.3.2"
 SCRIPT_NAME="macos-debloater"
 
 # Root-only by design (enterprise / fleet): state is system-wide under
@@ -1193,7 +1193,10 @@ tui_draw() {
     fi
   done
   echo "${C_DIM}------------------------------------------------------------------${C_RST}"
-  echo "  up/down or j/k move   Enter or click choose   1-4 jump   wheel scrolls   q quit"
+  printf '  j/k move  Enter choose  1-4 jump  q quit   Dry-run: %s   Thermal: %s\n' \
+    "$([[ "$DRY_RUN" == "1" ]] && echo ON || echo off)" \
+    "$([[ "$ASK_THERMAL" == "1" ]] && echo ON || echo off)"
+  [[ -f "$CONFIG_FILE" ]] && echo "  ${C_DIM}config $CONFIG_FILE pre-sets values${C_RST}"
 }
 
 tui_pause() { printf '%s' "Press any key to return to the menu"; IFS='' read -r -s -n1; }
@@ -1320,13 +1323,14 @@ dangerous_gate() {
   echo "${C_RED}${C_BOLD}WARNING 1 - DANGEROUS MODE${C_RST}"
   echo "Disables the thermal daemon (overheating / possible laptop damage) and a"
   echo "large extra set of services. It still boots. Most optional services off."
-  ask_yes "${C_RED}Are you sure? (1/2)${C_RST}" || { warn "aborted."; exit 0; }
+  ask_yes "${C_RED}Are you sure? (1/2)${C_RST}" || { warn "aborted."; return 1; }
   echo ""
   echo "${C_RED}${C_BOLD}WARNING 2 - REALLY SURE?${C_RST}"
   echo "Thermal protection stays off and many features stop working until you run"
   echo "Restore / Restore all from the menu."
-  ask_yes "${C_RED}Are you REALLY sure? (2/2)${C_RST}" || { warn "aborted."; exit 0; }
+  ask_yes "${C_RED}Are you REALLY sure? (2/2)${C_RST}" || { warn "aborted."; return 1; }
   ok "double confirmation accepted."
+  return 0
 }
 
 reboot_prompt() {
@@ -1348,6 +1352,12 @@ silent_flow() {
     err "AUTO_APPLY requires MODE=1..4 (or MANUAL_LABELS) in $CONFIG_FILE"
     exit 1
   fi
+  # Say why there is no menu. A leftover AUTO_APPLY config silently replacing
+  # the TUI is the #1 "why is it running by itself?" surprise.
+  log "${C_BOLD}Fleet mode: $CONFIG_FILE has AUTO_APPLY=1, so the menu is skipped.${C_RST}"
+  log "  Set AUTO_APPLY=0 (or delete the config) to get the interactive menu back."
+  log ""
+  : > "$SELECTED_TMP"
   print_header
   mode_note
   echo ""
@@ -1390,6 +1400,7 @@ silent_flow() {
 
 # ---- run ---------------------------------------------------------------------
 interactive_flow() {
+  : > "$SELECTED_TMP"
   print_header
   mode_note
   echo ""
@@ -1412,15 +1423,15 @@ interactive_flow() {
       echo ""
       warn "dry-run: no confirmation needed; nothing is applied."
     else
-      dangerous_gate
+      dangerous_gate || return 1
       kernel_confirm
     fi
   fi
 
   show_plan
-  [[ "$(count_picked)" == "0" ]] && { err "nothing selected."; exit 0; }
+  [[ "$(count_picked)" == "0" ]] && { err "nothing selected."; return 1; }
 
-  ask_yes "Apply these changes?" || { warn "aborted."; exit 0; }
+  ask_yes "Apply these changes?" || { warn "aborted."; return 1; }
 
   if [[ "$DRY_RUN" == "1" ]]; then
     log "${C_BOLD}DRY-RUN: commands only.${C_RST}"
@@ -1535,11 +1546,18 @@ fi
 
 # The TUI is the whole interface. It returns with MODE set (a mode chosen), or
 # with MODE=0 plus MANUAL_LABELS set (Custom), or nothing chosen (Quit).
-tui_main
+# interactive_flow returns 1 when the user backs out (abort, nothing selected),
+# in which case we loop back to the menu instead of killing the session.
+while :; do
+  TUI_DONE=0; MODE=0; MANUAL_LABELS=""
+  tui_main
 
-[[ "$MODE" == "0" && -z "${MANUAL_LABELS// /}" ]] && exit 0
+  [[ "$MODE" == "0" && -z "${MANUAL_LABELS// /}" ]] && break
 
-# destructive direction requires SIP off (dry-run is exempt)
-if [[ "$SIP_STATE" != "disabled" && "$DRY_RUN" == "0" ]]; then sip_block; fi
+  # destructive direction requires SIP off (dry-run is exempt)
+  if [[ "$SIP_STATE" != "disabled" && "$DRY_RUN" == "0" ]]; then sip_block; fi
 
-interactive_flow
+  interactive_flow && break
+  # aborted / nothing selected -> back to the menu
+  echo "${C_DIM}Returning to the menu.${C_RST}"
+done

@@ -64,7 +64,8 @@ main() {
   trap 'rm -f "$tmp"' EXIT
 
   show_banner
-  echo "${DIM}  installing from $REPO_URL${RST}"
+  # printf %b so the DIM/RST escape codes are interpreted, not printed raw.
+  printf '%b\n' "${DIM}  installing from $REPO_URL${RST}"
   echo ""
 
   curl -fsSL "$SRC" -o "$tmp" 2>/dev/null &
