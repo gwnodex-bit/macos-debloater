@@ -1,3 +1,12 @@
+```
+███████╗██╗   ██╗ ██████╗██╗  ██╗ █████╗ ███████╗██╗     ██████╗
+██╔════╝██║   ██║██╔════╝██║ ██╔╝██╔══██╗██╔════╝██║     ██╔══██╗
+█████╗  ██║   ██║██║     █████╔╝ ███████║███████╗██║     ██████╔╝
+██╔══╝  ██║   ██║██║     ██╔═██╗ ██╔══██║╚════██║██║     ██╔══██╗
+██║     ╚██████╔╝╚██████╗██║  ██╗██║  ██║███████║███████╗██║  ██║
+╚═╝      ╚═════╝  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝
+```
+
 # macos-debloater
 
 Turn off the macOS services you don't use. All of them, or just the safe ones — your call, from a menu.
@@ -129,6 +138,75 @@ sudo rm /usr/local/bin/macos-debloater
 
 ---
 
+## Repository structure
+
+```
+macos-debloater/
+├── macos-debloater.sh      the whole tool: catalog, TUI, apply, restore
+├── install.sh              curl one-liner installer (banner + progress)
+├── README.md               this file
+└── RESEARCH.md             sources + risk analysis behind the risky modes
+```
+
+### Inside `macos-debloater.sh`
+
+A single bash script, sections in order:
+
+```
+macos-debloater.sh
+├── env                    OS/CPU/RAM detection, system-wide state paths
+├── config                 enterprise presets loaded before the TUI
+├── OS support + SIP       refuses unsupported macOS; SIP gate + Recovery help
+├── deny list              boot/critical services that are never disabled
+├── CATALOG                201 service entries: label|hint|tier|group|since|desc
+├── resolve                matches every label to a real plist on this macOS
+├── service actions        launchctl disable/enable, per-user gui domain
+├── snapshot + restore     disabled-DB snapshot, manifest, generated restore.sh
+├── optimization tweaks    defaults / pmset / sysctl / mdutil, old values saved
+├── output                 catalog listing, header, mode notes
+├── TUI                    the menu: 13 items, mouse + keyboard
+├── prompts + gates        thermal YES-gate, double-confirm, reboot prompt
+├── silent fleet run       AUTO_APPLY: config replaces the TUI, no prompts
+└── main                   load_config -> TUI (or silent) -> SIP gate -> apply
+```
+
+### Runtime state (written when you run it)
+
+```
+/Library/Application Support/macos-debloater/
+├── config                 your presets (MODE, AUTO_APPLY, ...)
+├── manifest.txt           what the last run disabled
+├── restore.sh             generated: re-enables everything in the manifest
+├── backups/<timestamp>/   one directory per run
+│   ├── disabled.plist.bak        system disabled DB
+│   ├── disabled.<uid>.plist.bak  per-user disabled DBs (every account)
+│   ├── disabled-print.txt        launchctl print-disabled for all domains
+│   ├── opts-backup.txt           old defaults/pmset/sysctl values
+│   ├── mdutil-backup.txt         Spotlight index state
+│   └── sysctl-applied.txt        sysctls to re-apply at boot
+└── ...and the boot plist:
+    /Library/LaunchDaemons/com.macos-debloater.sysctl.plist
+```
+
+### The catalog format
+
+Each line in `CATALOG`:
+
+```
+com.apple.somethingd|gui|2|cloud|12|What it does, honestly
+```
+
+| Field | Meaning |
+|---|---|
+| `label` | launchd label, e.g. `com.apple.somethingd` |
+| `hint` | `gui` or `system` domain hint |
+| `tier` | risk tier: `1` safe, `2` aggressive, `3` thermal, `4` dangerous |
+| `group` | `cloud` / `maps` / `media` / `store` / `network` / `access` / `misc` |
+| `since` | first macOS this entry applies to (older ignored) |
+| `desc` | one-line description shown in the plan and catalog |
+
+The script only acts on an entry if the plist resolves on the running macOS — a wrong guess degrades to "skipped," never to "disabled something important."
+
 ## Development
 
 ```bash
@@ -138,13 +216,7 @@ bash -n macos-debloater.sh        # syntax
 shellcheck macos-debloater.sh     # lint, clean at warning level
 ```
 
-To contribute a catalog entry, add a line to `CATALOG` in the script:
-
-```
-com.apple.somethingd|gui|2|cloud|12|What it does, honestly
-```
-
-Fields: `label|domain-hint|tier(1-4)|group|min-macOS-version|description`. The script only acts on an entry if the plist resolves on the running macOS — a wrong guess degrades to "skipped," never to "disabled something important."
+To contribute a catalog entry, add a line to `CATALOG` in the script per the format above.
 
 ---
 
