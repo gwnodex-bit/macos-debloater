@@ -12,7 +12,7 @@ if [ -z "${BASH_VERSION:-}" ]; then
   exec /bin/bash "$0" "$@"
 fi
 set -u
-VERSION="1.3.0"
+VERSION="1.3.1"
 SCRIPT_NAME="macos-debloater"
 
 # Root-only by design (enterprise / fleet): state is system-wide under
@@ -131,6 +131,8 @@ load_config() {
   while IFS='=' read -r k v; do
     k="${k// /}"; [[ -z "$k" || "$k" == \#* ]] && continue
     v="${v%\r}"
+    # Trim surrounding whitespace: IT may write "MODE = 2" with spaces.
+    v="$(printf '%s' "$v" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
     case "$k" in
       MODE)             [[ "$v" =~ ^[1-4]$ ]] && MODE="$v" ;;
       DRY_RUN)          [[ "$v" == "1" ]] && DRY_RUN=1 || DRY_RUN=0 ;;
@@ -203,7 +205,10 @@ sip_block() {
 # Always root (auto-elevated at the top of this file), so no sudo prefix needed.
 SUDO=""
 
-mkdir -p "$STATEDIR/backups" "$BAKDIR" "$(dirname "$LOGFILE")" 2>/dev/null
+# STATEDIR + log dir exist up front; BAKDIR is created lazily only when a
+# real apply starts (take_snapshot), so list/restore/dry-run runs don't leave
+# empty timestamped directories behind.
+mkdir -p "$STATEDIR/backups" "$(dirname "$LOGFILE")" 2>/dev/null
 
 log()  { echo -e "$*"; printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$(echo "$*" | sed 's/\x1b\[[0-9;]*m//g')" >> "$LOGFILE"; }
 ok()   { log "  [OK]   $*"; }
@@ -533,6 +538,7 @@ enable_service() {
 
 take_snapshot() {
   local uid
+  mkdir -p "$BAKDIR" 2>/dev/null
   log "${C_BOLD}Snapshotting the launchd disabled DB.${C_RST}"
   {
     echo "### system print-disabled"
@@ -792,7 +798,10 @@ opt_sysctl() { # key value   (records old value, applies, queues for boot persis
 opt_launchctl_limit() { # soft hard   (per-process open-file limit; revertible)
   local soft="$1" hard="$2" old
   if [[ "$DRY_RUN" == "1" ]]; then echo "  DRY: sudo launchctl limit maxfiles $soft $hard"; return 0; fi
-  old="$(launchctl limit maxfiles 2>/dev/null | awk 'NR==2{print $2"|"$3}')"
+  # `launchctl limit maxfiles` prints a single line: "maxfiles soft hard".
+  # Match by name, not by line number - NR==2 never fired, so the old limit
+  # was never recorded and could never be restored.
+  old="$(launchctl limit maxfiles 2>/dev/null | awk '$1=="maxfiles"{print $2"|"$3}')"
   [[ -n "$old" ]] && echo "LIMIT|$old" >> "$OPT_BACKUP"
   $SUDO launchctl limit maxfiles "$soft" "$hard" 2>/dev/null || return 1
 }
@@ -893,6 +902,20 @@ tweaks_mode4() {
     opt_pmset hibernatemode 0
     opt_sleepimage
   fi
+  # FileVault + ESnet buffers: only after the final Apply gate has passed.
+  # In dry-run these print the DRY line without touching anything.
+  if [[ "$FILEVAULT_DISABLE" == "1" ]]; then
+    if [[ "$DRY_RUN" == "1" ]]; then echo "  DRY: sudo fdesetup disable"
+    else
+      $SUDO fdesetup disable 2>/dev/null || warn "fdesetup disable failed."
+      warn "FileVault decryption is running in the background; it can take hours."
+    fi
+  fi
+  if [[ "$NETWORK_TUNING" == "1" ]]; then
+    opt_sysctl net.inet.tcp.win_scale_factor 8
+    opt_sysctl net.inet.tcp.autorcvbufmax 33554432
+    opt_sysctl net.inet.tcp.autosndbufmax 33554432
+  fi
   opt_kill "Dock Finder cfprefsd SystemUIServer"
 }
 
@@ -906,9 +929,18 @@ apply_tweaks() {
 }
 
 restore_optimizations() {
-  local dir backup line
-  dir="$(ls -dt "$STATEDIR/backups"/*/ 2>/dev/null | head -1)"
-  [[ -z "$dir" ]] && { warn "no backup directory found; nothing to restore."; return 1; }
+  local dir backup line d restored_sysctl=0
+  # The newest backup directory that actually contains a restoreable backup.
+  # (Every startup used to create an empty dir; those must be skipped.)
+  # BSD stat does not interpret \t in the format string, and the path itself
+  # contains spaces ("/Library/Application Support/..."), so delimit with |
+  # (backup dir names are timestamps and never contain |).
+  dir=""
+  while IFS='|' read -r _m d; do
+    [[ -z "$d" ]] && continue
+    if [[ -s "$d/opts-backup.txt" || -f "$d/mdutil-backup.txt" ]]; then dir="$d"; break; fi
+  done < <(find "$STATEDIR/backups" -mindepth 1 -maxdepth 1 -type d -exec stat -f '%m|%N' {} \; 2>/dev/null | sort -rn)
+  [[ -z "$dir" ]] && { warn "no backup directory with data found; nothing to restore."; return 1; }
   backup="$dir/opts-backup.txt"
   log "Restoring optimizations from $dir"
   if [[ -f "$dir/mdutil-backup.txt" ]]; then
@@ -928,6 +960,7 @@ restore_optimizations() {
         if [[ "$DRY_RUN" == "1" ]]; then echo "  DRY: sudo pmset -${F[2]} ${F[1]} ${F[3]}"
         else $SUDO pmset -"${F[2]}" "${F[1]}" "${F[3]}" 2>/dev/null; fi ;;
       SYSCTL)
+        restored_sysctl=1
         if [[ "$DRY_RUN" == "1" ]]; then echo "  DRY: sudo sysctl -w ${F[1]}=${F[2]}"
         else $SUDO sysctl -w "${F[1]}=${F[2]}" >/dev/null 2>&1; fi ;;
       LIMIT)
@@ -935,7 +968,12 @@ restore_optimizations() {
         else $SUDO launchctl limit maxfiles "${F[1]}" "${F[2]}" 2>/dev/null; fi ;;
     esac
   done < "$backup"
-  sysctl_persist_remove
+  # Only drop the boot-persistence plist when this backup actually restores
+  # sysctls. Otherwise an older (Mode 1-2) backup would silently stop a newer
+  # run's sysctls from persisting across reboots. Never in dry-run: that would
+  # delete the real plist from a preview (sysctl_persist_remove is not
+  # DRY-guarded itself).
+  if [[ "$restored_sysctl" == "1" && "$DRY_RUN" != "1" ]]; then sysctl_persist_remove; fi
   opt_kill "Dock Finder cfprefsd SystemUIServer"
   ok "optimizations restored."
 }
@@ -966,7 +1004,7 @@ list_catalog() {
   done < <(sort -u -t'|' -k1,1 -k2,2 "$RESOLVED_TMP")
 }
 
-print_moon() {
+print_banner() {
   if [[ -t 1 ]]; then
     printf '%s\n' \
       "${C_BOLD}${C_MAG}   macos-debloater${C_RST}" \
@@ -1225,7 +1263,7 @@ tui_exec() {
 }
 
 tui_main() {
-  print_moon
+  print_banner
   sleep 1 2>/dev/null || true
   COLS="${COLUMNS:-$(tput cols 2>/dev/null)}"
   [[ -z "$COLS" || "$COLS" == "0" ]] && COLS=80
@@ -1257,6 +1295,7 @@ tui_main() {
 ask_yes() { local ans; read -r -p "${1:-Continue?} [y/N] " ans || return 1; case "$ans" in [yY]|[yY][eE][sS]) return 0 ;; *) return 1 ;; esac; }
 
 thermal_confirm() {
+  local answer
   echo ""
   echo "${C_RED}${C_BOLD}EXTREME: thermal daemon${C_RST}"
   echo "Disables the hardware thermal-management daemon for this CPU."
@@ -1325,19 +1364,9 @@ silent_flow() {
 
   if [[ "$ASK_THERMAL" == "1" && "$MODE" != "4" ]]; then thermal_arch_select; fi
 
-  if [[ "$MODE" == "4" ]]; then
-    if [[ "$HIBERNATE_OFF" == "1" ]]; then ok "hibernation off (config)."; fi
-    if [[ "$FILEVAULT_DISABLE" == "1" ]]; then
-      if [[ "$DRY_RUN" == "1" ]]; then echo "  DRY: sudo fdesetup disable"
-      else $SUDO fdesetup disable 2>/dev/null || warn "fdesetup disable failed."; fi
-    fi
-    if [[ "$NETWORK_TUNING" == "1" ]]; then
-      opt_sysctl net.inet.tcp.win_scale_factor 8
-      opt_sysctl net.inet.tcp.autorcvbufmax 33554432
-      opt_sysctl net.inet.tcp.autosndbufmax 33554432
-      ok "network buffers raised (config)."
-    fi
-  fi
+  if [[ "$MODE" == "4" && "$HIBERNATE_OFF" == "1" ]]; then ok "hibernation off (config)."; fi
+  # FILEVAULT_DISABLE / NETWORK_TUNING are handled inside tweaks_mode4,
+  # which runs after take_snapshot in the apply path below.
 
   show_plan
   [[ "$(count_picked)" == "0" ]] && { err "nothing selected."; exit 1; }
@@ -1431,6 +1460,8 @@ kernel_confirm() {
   fi
 
   # 2) FileVault: research says hardware-accelerated on Apple Silicon (~free).
+  #    Only a flag is set here; the actual `fdesetup disable` runs AFTER the
+  #    final "Apply these changes?" gate, so answering N aborts cleanly.
   echo ""
   log "${C_BOLD}FileVault${C_RST}"
   st="$(fdesetup status 2>/dev/null | tr -d '\n')"
@@ -1445,26 +1476,28 @@ kernel_confirm() {
       log "  still removes whole-disk encryption."
     fi
     if ask_yes "${C_RED}Disable FileVault anyway? (security loss, ~no speed gain) [y/N]${C_RST}"; then
-      $SUDO fdesetup disable 2>/dev/null || warn "fdesetup disable failed."
-      warn "FileVault decryption is running in the background; it can take hours."
+      FILEVAULT_DISABLE=1
+      ok "FileVault disable queued (applies only if you confirm below)."
     else
+      FILEVAULT_DISABLE=0
       info "FileVault kept enabled (recommended)."
     fi
   else
+    FILEVAULT_DISABLE=0
     info "FileVault is already OFF - nothing to do."
   fi
 
   # 3) Network buffers: ESnet tuning is for wired 1Gbps+; degrades Wi-Fi.
+  #    Same pattern: flag only, applied after the final gate.
   echo ""
   log "${C_BOLD}Network buffer tuning (ESnet)${C_RST}"
   log "  Raises TCP window scaling to 8 and autotune buffers to 32 MB."
   log "  ESnet guidance: wired 1Gbps+ only. On Wi-Fi this can REDUCE throughput."
   if ask_yes "Apply network buffer tuning? (wired 1Gbps+ only) [y/N]"; then
-    opt_sysctl net.inet.tcp.win_scale_factor 8
-    opt_sysctl net.inet.tcp.autorcvbufmax 33554432
-    opt_sysctl net.inet.tcp.autosndbufmax 33554432
-    ok "network buffers raised."
+    NETWORK_TUNING=1
+    ok "network tuning queued (applies only if you confirm below)."
   else
+    NETWORK_TUNING=0
     info "network tuning skipped."
   fi
 }
@@ -1480,6 +1513,24 @@ if [[ "$AUTO_APPLY" == "1" ]]; then
   if [[ "$SIP_STATE" != "disabled" && "$DRY_RUN" == "0" ]]; then sip_block; fi
   silent_flow
   exit 0
+fi
+
+# No command-line flags exist anymore (removed in v1.3.0). Reject them instead
+# of silently ignoring them - a flag run that no-ops is the worst failure mode.
+if [[ "$#" -gt 0 ]]; then
+  err "unknown argument(s): $*"
+  echo "macos-debloater is TUI-only. Flags were removed in v1.3.0." >&2
+  echo "For unattended/fleet runs, pre-seed $CONFIG_FILE with AUTO_APPLY=1." >&2
+  exit 1
+fi
+
+# The TUI needs a real terminal. From a pipe/cron/MDM job without AUTO_APPLY,
+# fail loudly instead of dumping raw escape codes and exiting 0 doing nothing.
+if [[ ! -t 0 || ! -t 1 ]]; then
+  err "no terminal detected (stdin/stdout is not a TTY)."
+  echo "macos-debloater is interactive: run it in a terminal and use the menu." >&2
+  echo "For unattended/fleet runs, pre-seed $CONFIG_FILE with AUTO_APPLY=1." >&2
+  exit 1
 fi
 
 # The TUI is the whole interface. It returns with MODE set (a mode chosen), or
