@@ -12,7 +12,7 @@ if [ -z "${BASH_VERSION:-}" ]; then
   exec /bin/bash "$0" "$@"
 fi
 set -u
-VERSION="1.3.2"
+VERSION="1.3.3"
 SCRIPT_NAME="macos-debloater"
 
 # Root-only by design (enterprise / fleet): state is system-wide under
@@ -178,9 +178,14 @@ SIP_STATE="$(sip_state)"
 
 sip_help_text() {
   echo ""
-  echo "${C_RED}${C_BOLD}SIP is ${SIP_STATE}.${C_RST} Real runs need SIP disabled."
-  echo ""
-  echo "How to disable SIP on this Mac:"
+  if [[ "$SIP_STATE" == "disabled" ]]; then
+    echo "${C_GRN}${C_BOLD}SIP is disabled - real runs are allowed.${C_RST}"
+    echo "The steps below are just for reference in case you ever need them again."
+  else
+    echo "${C_RED}${C_BOLD}SIP is ${SIP_STATE}.${C_RST} Real runs need SIP disabled."
+    echo ""
+    echo "How to disable SIP on this Mac:"
+  fi
   echo "  1. Shut the Mac down."
   echo "  2. Boot into Recovery:"
   echo "     Apple Silicon: hold the power button at startup, then Options -> Continue."
@@ -1004,17 +1009,6 @@ list_catalog() {
   done < <(sort -u -t'|' -k1,1 -k2,2 "$RESOLVED_TMP")
 }
 
-print_banner() {
-  if [[ -t 1 ]]; then
-    printf '%s\n' \
-      "${C_BOLD}${C_MAG}   macos-debloater${C_RST}" \
-      "${C_DIM}   debloat + optimize, mode 1-4.${C_RST}" \
-      ""
-  else
-    printf '%s\n' "${C_BOLD}macos-debloater${C_RST} - debloat + optimize, mode 1-4."
-  fi
-}
-
 print_header() {
   local sipc drun
   if [[ "$SIP_STATE" == "disabled" ]]; then sipc="${C_GRN}"; elif [[ "$SIP_STATE" == "enabled" ]]; then sipc="${C_RED}"; else sipc="${C_YLW}"; fi
@@ -1091,7 +1085,10 @@ COLS=80
 STTY_SAVED=""
 
 tui_screen_off() {
-  printf '\033[?1006l\033[?1000l\033[?25h\033[0m\033[?1049l'
+  # Leave the alternate screen, then clear the main screen. Every action and
+  # every quit starts from a clean terminal instead of stacking output below
+  # everything that ran before.
+  printf '\033[?1006l\033[?1000l\033[?25h\033[0m\033[?1049l\033[2J\033[H'
 }
 
 tui_screen_on() {
@@ -1199,7 +1196,11 @@ tui_draw() {
   [[ -f "$CONFIG_FILE" ]] && echo "  ${C_DIM}config $CONFIG_FILE pre-sets values${C_RST}"
 }
 
-tui_pause() { printf '%s' "Press any key to return to the menu"; IFS='' read -r -s -n1; }
+tui_pause() {
+  printf '\nPress any key to return to the menu'
+  IFS='' read -r -s -n1
+  echo ""
+}
 
 tui_exec() {
   local a="${TUI_ACTIONS[$TUI_SEL]}"
@@ -1266,8 +1267,6 @@ tui_exec() {
 }
 
 tui_main() {
-  print_banner
-  sleep 1 2>/dev/null || true
   COLS="${COLUMNS:-$(tput cols 2>/dev/null)}"
   [[ -z "$COLS" || "$COLS" == "0" ]] && COLS=80
   STTY_SAVED="$(stty -g 2>/dev/null)"
