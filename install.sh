@@ -1,5 +1,5 @@
 #!/bin/bash
-# macos-debloater installer — single command, nothing else.
+# macos-debloater installer - single command, nothing else.
 #
 #   curl -fsSL https://raw.githubusercontent.com/xscope0/macos-debloater/main/install.sh | bash
 #
@@ -16,7 +16,7 @@ main() {
   tmp="$(mktemp /tmp/macos-debloater.XXXXXX)" || exit 1
   trap 'rm -f "$tmp"' EXIT
 
-  echo "Fetching macos-debloater.sh from $REPO_URL …"
+  echo "Fetching macos-debloater.sh from $REPO_URL ..."
   if ! curl -fsSL "$SRC" -o "$tmp" 2>/dev/null; then
     echo "ERROR: could not download $SRC" >&2
     echo "Check the URL, your network, or set REPO_URL to a mirror." >&2
