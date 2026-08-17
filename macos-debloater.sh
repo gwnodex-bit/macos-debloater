@@ -12,7 +12,7 @@ if [ -z "${BASH_VERSION:-}" ]; then
   exec /bin/bash "$0" "$@"
 fi
 set -u
-VERSION="1.3.3"
+VERSION="1.3.4"
 SCRIPT_NAME="macos-debloater"
 
 # Root-only by design (enterprise / fleet): state is system-wide under
@@ -110,6 +110,7 @@ ASK_THERMAL=0    # 0 = thermal daemon only in Mode 4, 1 = also Modes 1-3 (TUI to
 MODE=0           # selected mode 1..4; set when a mode is chosen in the TUI
 MANUAL_LABELS="" # extra labels typed into the Custom menu item
 AUTO_APPLY=0     # 1 = silent run from config file (enterprise fleet / MDM)
+PLAN_OK=0        # 1 = plan was built + confirmed inside the TUI (skip re-prompting)
 HIBERNATE_OFF=0  # 0 = keep safe-sleep/hibernation, 1 = hibernatemode 0 + drop sleepimage (Mode 4)
 FILEVAULT_DISABLE=0 # 1 = Mode 4: disable FileVault (config-driven, enterprise only)
 NETWORK_TUNING=0    # 1 = Mode 4: ESnet TCP buffers (config-driven, wired 1Gbps+ only)
@@ -639,6 +640,16 @@ select_by_mode() {
   esac
 }
 
+# The one selection routine both the TUI plan and the apply flow use, so what
+# is shown on screen is exactly what gets applied. ASK_THERMAL=1 includes the
+# thermal daemon in Modes 1-3 without a second prompt (the TUI toggle is the
+# consent); the raw terminal flow keeps its own thermal_confirm prompt.
+build_plan() {
+  : > "$SELECTED_TMP"
+  select_by_mode
+  if [[ "$ASK_THERMAL" == "1" && "$MODE" != "4" ]]; then thermal_arch_select; fi
+}
+
 select_label() {
   local label="$1" line hit="" domain hint tier group desc
   if is_denied "$label"; then err "refusing $label: boot/critical (deny list)."; return 1; fi
@@ -662,18 +673,27 @@ select_label() {
 }
 
 apply_selection() {
-  local domain label tier group desc rc=0
+  local domain label tier group desc rc=0 done=0 total=0
   if [[ "$DRY_RUN" != "1" ]]; then : > "$MANIFEST"; fi
+  total=$(sort -u "$SELECTED_TMP" | grep -c '|' || true)
+  [[ "$total" == "0" ]] && total=1
   while IFS='|' read -r domain label tier group desc; do
     [[ -z "$label" ]] && continue
-    printf "  %-6s %-56s " "$domain" "$label"
+    done=$((done+1))
+    if [[ -t 1 ]]; then
+      # interactive: one progress bar instead of a wall of per-service lines
+      printf '\r  %s  %3d/%-3d  %-46s' "$(tui_bar 20 $(( done * 100 / total )))" "$done" "$total" "$label"
+    else
+      printf "  %-6s %-56s " "$domain" "$label"
+    fi
     if disable_service "$domain" "$label"; then
-      echo "${C_GRN}disabled${C_RST}"
+      [[ -t 1 ]] || echo "${C_GRN}disabled${C_RST}"
       if [[ "$DRY_RUN" != "1" ]]; then printf '%s|%s\n' "$domain" "$label" >> "$MANIFEST"; fi
     else
-      echo "${C_RED}failed${C_RST}"
+      [[ -t 1 ]] || echo "${C_RED}failed${C_RST}"
     fi
   done < <(sort -u -t'|' -k3,3n -k4,4 -k1,1 -k2,2 "$SELECTED_TMP")
+  [[ -t 1 ]] && printf '\r  %s  %d/%d done%s\n' "$(tui_bar 20 100)" "$done" "$total" "$( [[ "$DRY_RUN" == "1" ]] && echo ' (dry-run, nothing changed)' )"
 }
 
 # ---- restore ----------------------------------------------------------------
@@ -1100,18 +1120,116 @@ tui_cleanup() {
   [[ -n "$STTY_SAVED" ]] && stty "$STTY_SAVED" 2>/dev/null
 }
 
-tui_crop() {
-  local s="$1" w="${2:-$COLS}"
-  LC_ALL=C awk -v w="$w" '{ if (length($0) > w) s = substr($0,1,w-3) "..."; else s = $0; print s }' <<< "$s"
+# ---- TUI drawing helpers (box drawing + blocks, no emoji) -------------------
+tui_rep() { # char count -> repeated string
+  local c="$1" n="$2" s="" i
+  for ((i=0;i<n;i++)); do s+="$c"; done
+  printf '%s' "$s"
 }
 
-tui_row_plain() {
-  local i="$1"
+tui_lpad() { # text width -> left-justified, truncated to width (char-aware)
+  local s="$1" w="$2" i
+  s="${s:0:$w}"                      # truncate by characters (UTF-8 safe)
+  for ((i=${#s}; i<w; i++)); do s+=" "; done   # pad by characters, not bytes
+  printf '%s' "$s"
+}
+
+tui_bar() { # width percent -> [blocks] bar
+  local w="$1" pct="$2" i s=""
+  [[ "$pct" -gt 100 ]] && pct=100
+  [[ "$pct" -lt 0 ]] && pct=0
+  for ((i=0;i<w;i++)); do
+    if (( i * 100 < pct * w )); then s+="█"; else s+="░"; fi
+  done
+  printf '%s' "$s"
+}
+
+tui_topbar() { # plain_title colored_title width -> ┌─ title ─...─┐
+  local plain="$1" colored="$2" w="$3" pad
+  pad=$(( w - ${#plain} - 4 ))   # ┌─ (2) + title + pad + ─┐ (2) = w
+  [[ "$pad" -lt 1 ]] && pad=1
+  printf '┌─%s%s─┐' "$colored" "$(tui_rep '─' "$pad")"
+}
+
+# Panel borders are drawn with inner width (the item column width); the corners
+# sit exactly on the item column's left/right pipes. Returns inner+2 chars.
+tui_panel_top() { # title inner_width -> ┌─ title ─...─┐
+  local t="$1" w="$2" pad
+  pad=$(( w - ${#t} - 2 ))
+  [[ "$pad" -lt 1 ]] && pad=1
+  printf '┌─%s%s─┐' "$t" "$(tui_rep '─' "$pad")"
+}
+
+tui_panel_bottom() { # inner_width -> └...┘
+  printf '└%s┘' "$(tui_rep '─' "$1")"
+}
+
+tui_cell() { # plain_text color_prefix width -> padded cell with color outside the pad
+  local plain="$1" color="$2" w="$3"
+  printf '%s%s%s' "$color" "$(tui_lpad "$plain" "$w")" "${C_RST}"
+}
+
+TUI_DESC=(
+  "Telemetry, analytics, diagnostics, Siri and Apple Intelligence backends off. Nothing user-facing is removed."
+  "Safe + iCloud extras, Maps, media extras, App Store, network services. Some features lost."
+  "Balanced + Spotlight, Find My, Messages, FaceTime, AirDrop/AirPlay, Screen Sharing, Time Machine, Photos, Wallet. Many features lost."
+  "Aggressive + the thermal daemon, App Store, Mail, crash reporting, live transcription. Real risk: double-confirmed."
+  "Preview only: every command is printed, nothing is executed. Works even with SIP enabled."
+  "Include the thermal daemon in Modes 1-3 as well. Default: Mode 4 only."
+  "Print the full service catalog for this exact macOS version."
+  "Re-enable the services disabled by the last run."
+  "Undo the defaults/pmset/Spotlight tweaks back to the saved values."
+  "Re-enable every catalog entry, regardless of what ran."
+  "Type specific labels to disable, e.g. com.apple.weatherd com.apple.newsd."
+  "How to disable SIP: Recovery-mode steps plus a video walkthrough."
+  "Exit. Nothing is applied."
+)
+
+tui_left_text() { # menu row text (left panel)
+  local i="$1" cnt
   case "$i" in
-    4) if [[ "$DRY_RUN" == "1" ]]; then printf 'Dry-run     ON  - preview only, nothing changes'; else printf 'Dry-run     OFF - apply changes for real'; fi ;;
-    5) if [[ "$ASK_THERMAL" == "1" ]]; then printf 'Thermal     ON  - also disable in Modes 1-3'; else printf 'Thermal     OFF - Mode 4 always includes it'; fi ;;
-    *) printf '%s' "${TUI_ITEMS[$i]}" ;;
+    0) cnt="${MODE_COUNTS[1]:-}"; printf 'Safe%s' "${cnt:+ (${cnt})}" ;;
+    1) cnt="${MODE_COUNTS[2]:-}"; printf 'Balanced%s' "${cnt:+ (${cnt})}" ;;
+    2) cnt="${MODE_COUNTS[3]:-}"; printf 'Aggressive%s' "${cnt:+ (${cnt})}" ;;
+    3) cnt="${MODE_COUNTS[4]:-}"; printf 'Dangerous%s' "${cnt:+ (${cnt})}" ;;
+    4) if [[ "$DRY_RUN" == "1" ]]; then printf 'Dry-run: ON'; else printf 'Dry-run: OFF'; fi ;;
+    5) if [[ "$ASK_THERMAL" == "1" ]]; then printf 'Thermal: ON'; else printf 'Thermal: OFF'; fi ;;
+    6) printf 'List catalog' ;;
+    7) printf 'Restore last run' ;;
+    8) printf 'Restore features' ;;
+    9) printf 'Restore all' ;;
+    10) printf 'Custom labels' ;;
+    11) printf 'SIP help' ;;
+    12) printf 'Quit' ;;
   esac
+}
+
+tui_item_short() { # short label for the About panel
+  case "$1" in
+    0) printf 'Safe' ;; 1) printf 'Balanced' ;; 2) printf 'Aggressive' ;; 3) printf 'Dangerous' ;;
+    4) printf 'Dry-run' ;; 5) printf 'Thermal' ;; 6) printf 'List' ;; 7) printf 'Restore' ;;
+    8) printf 'Restore features' ;; 9) printf 'Restore all' ;; 10) printf 'Custom' ;;
+    11) printf 'SIP help' ;; 12) printf 'Quit' ;;
+  esac
+}
+
+tui_detail_block() { # right-panel text for the selected item (one line per row, plain)
+  local w="$1" i="$TUI_SEL" desc short
+  desc="${TUI_DESC[$i]:-}"
+  short="$(tui_item_short "$i")"
+  printf '%s\n' "$short"
+  while [[ "${#desc}" -gt $(( w - 2 )) ]]; do
+    printf '%s\n' "${desc:0:$(( w - 2 ))}"
+    desc="${desc:$(( w - 2 ))}"
+  done
+  printf '%s\n' "$desc"
+  printf '%s\n' ""
+  printf '%s\n' "Host  ${HW_NAME} (${HW_ARCH})"
+  printf '%s\n' "CPU   ${CPU_BRAND}"
+  printf '%s\n' "RAM   ${MEM_GB} GB"
+  printf '%s\n' "OS    ${OS_VER}"
+  printf '%s\n' "SIP   ${SIP_STATE}"
+  printf '%s\n' "Users ${USER_COUNT}"
 }
 
 tui_key() {
@@ -1155,8 +1273,9 @@ mouse_handle() {
   esac
   case "$b" in
     0)
-      if [[ "$y" =~ ^[0-9]+$ && "$y" -ge 3 && "$y" -lt $(( 3 + ${#TUI_ITEMS[@]} )) ]]; then
-        TUI_SEL=$(( y - 3 ))
+      # framed layout: padding row at 2, panel top at 3, items start at row 4
+      if [[ "$y" =~ ^[0-9]+$ && "$y" -ge 4 && "$y" -lt $(( 4 + ${#TUI_ITEMS[@]} )) && "$x" -ge 3 ]]; then
+        TUI_SEL=$(( y - 4 ))
         tui_exec
       fi ;;
     64) TUI_SEL=$(( (TUI_SEL - 1 + ${#TUI_ITEMS[@]}) % ${#TUI_ITEMS[@]} )) ;;
@@ -1165,35 +1284,74 @@ mouse_handle() {
 }
 
 tui_draw() {
-  local i n=${#TUI_ITEMS[@]} text plain dtc sipc modec
+  local i n=${#TUI_ITEMS[@]} left modec sipc title_p title_c dry thm
+  local w="${COLS:-80}"
   if [[ "$SIP_STATE" == "disabled" ]]; then sipc="${C_GRN}"; elif [[ "$SIP_STATE" == "enabled" ]]; then sipc="${C_RED}"; else sipc="${C_YLW}"; fi
+  # geometry: two panels side by side inside an outer frame
+  TL=30
+  if [[ "$w" -ge 72 ]]; then
+    TR=$(( w - TL - 12 )); [[ "$TR" -lt 22 ]] && TR=22
+  else
+    TL=$(( w - 8 )); [[ "$TL" -lt 20 ]] && TL=20; TR=0
+  fi
   printf '\033[?25l\033[2J\033[H'
-  printf '%s\n' "${C_BOLD}${C_MAG}${SCRIPT_NAME}${C_RST}${C_BOLD} v${VERSION}${C_RST}   ${C_CYN}${OS_VER}${C_RST}   ${sipc}SIP ${SIP_STATE}${C_RST}   ${C_YLW}${USER_COUNT} user(s)${C_RST}"
-  echo "${C_DIM}------------------------------------------------------------------${C_RST}"
+  # top bar (title shrinks on narrow terminals so the frame always fits)
+  if [[ "$w" -ge 76 ]]; then
+    title_p=" macos-debloater v${VERSION}   ${OS_VER}   SIP ${SIP_STATE} "
+    title_c=" ${C_BOLD}${C_MAG}${SCRIPT_NAME} v${VERSION}${C_RST}   ${C_CYN}${OS_VER}${C_RST}   ${sipc}SIP ${SIP_STATE}${C_RST} "
+  elif [[ "$w" -ge 40 ]]; then
+    title_p=" macos-debloater v${VERSION} "
+    title_c=" ${C_BOLD}${C_MAG}${SCRIPT_NAME} v${VERSION}${C_RST} "
+  else
+    title_p=" macos-debloater "
+    title_c=" ${C_BOLD}${C_MAG}${SCRIPT_NAME}${C_RST} "
+  fi
+  tui_topbar "$title_p" "$title_c" "$w"; echo ""
+  printf '│%s│\n' "$(tui_rep ' ' $(( w - 2 )))"
+  # panel titles
+  if [[ "$TR" -gt 0 ]]; then
+    printf '│  %s  %s  │\n' "$(tui_panel_top ' Select ' "$TL")" "$(tui_panel_top " About: $(tui_item_short "$TUI_SEL") " "$TR")"
+  else
+    printf '│  %s  │\n' "$(tui_panel_top ' Select ' "$TL")"
+  fi
+  # right panel block (regenerated per draw; depends on TUI_SEL)
+  local -a rblock=()
+  local l
+  if [[ "$TR" -gt 0 ]]; then
+    while IFS= read -r l; do rblock+=("$l"); done <<< "$(tui_detail_block "$TR")"
+  fi
+  # item rows
   for ((i=0;i<n;i++)); do
-    plain="$(tui_row_plain "$i")"
-    text="$(tui_crop "$plain" $(( COLS - 6 )))"
+    left="$(tui_left_text "$i")"
+    case "$i" in
+      0) modec="${C_GRN}" ;; 1) modec="${C_CYN}" ;; 2) modec="${C_YLW}" ;; 3) modec="${C_RED}" ;;
+      4) [[ "$DRY_RUN" == "1" ]] && modec="${C_GRN}" || modec="${C_DIM}" ;;
+      5) [[ "$ASK_THERMAL" == "1" ]] && modec="${C_GRN}" || modec="${C_DIM}" ;;
+      *) modec="${C_DIM}" ;;
+    esac
     if [[ "$i" == "$TUI_SEL" ]]; then
-      printf '  %s> %s%s\n' "${C_BG}${C_BOLD}" "$text" "${C_RST}"
+      printf '│  │%s│' "$(tui_cell " > ${left} " "${C_BG}${C_BOLD}${modec}" "$TL")"
     else
-      case "$i" in
-        0) modec="${C_GRN}" ;;
-        1) modec="${C_CYN}" ;;
-        2) modec="${C_YLW}" ;;
-        3) modec="${C_RED}" ;;
-        4|5) if [[ "$i" == "4" ]]; then dtc="$DRY_RUN"; else dtc="$ASK_THERMAL"; fi
-             [[ "$dtc" == "1" ]] && modec="${C_GRN}" || modec="${C_DIM}" ;;
-        6|7|8|9|10|11) modec="${C_DIM}" ;;
-        *) modec="${C_DIM}" ;;
-      esac
-      printf '    %s%s%s\n' "$modec" "$text" "${C_RST}"
+      printf '│  │%s│' "$(tui_cell "   ${left} " "${modec}" "$TL")"
+    fi
+    if [[ "$TR" -gt 0 ]]; then
+      printf '  │%s│  │\n' "$(tui_cell " ${rblock[$i]:-} " "${C_DIM}" "$TR")"
+    else
+      printf '  │\n'
     fi
   done
-  echo "${C_DIM}------------------------------------------------------------------${C_RST}"
-  printf '  j/k move  Enter choose  1-4 jump  q quit   Dry-run: %s   Thermal: %s\n' \
-    "$([[ "$DRY_RUN" == "1" ]] && echo ON || echo off)" \
-    "$([[ "$ASK_THERMAL" == "1" ]] && echo ON || echo off)"
-  [[ -f "$CONFIG_FILE" ]] && echo "  ${C_DIM}config $CONFIG_FILE pre-sets values${C_RST}"
+  # panel bottoms
+  if [[ "$TR" -gt 0 ]]; then
+    printf '│  %s  %s  │\n' "$(tui_panel_bottom "$TL")" "$(tui_panel_bottom "$TR")"
+  else
+    printf '│  %s  │\n' "$(tui_panel_bottom "$TL")"
+  fi
+  # footer: keys + state (plain text - colors inside a padded line break alignment)
+  if [[ "$DRY_RUN" == "1" ]]; then dry="ON"; else dry="off"; fi
+  if [[ "$ASK_THERMAL" == "1" ]]; then thm="ON"; else thm="off"; fi
+  printf '│  %s  │\n' "$(tui_lpad "↑/↓ or j/k  Enter select  1-4 jump  q quit  Dry-run: ${dry}  Thermal: ${thm}" $(( w - 6 )))"
+  [[ -f "$CONFIG_FILE" ]] && printf '│  %s  │\n' "$(tui_lpad "config $CONFIG_FILE pre-sets values" $(( w - 6 )))"
+  printf '└%s┘\n' "$(tui_rep '─' $(( w - 2 )))"
 }
 
 tui_pause() {
@@ -1213,7 +1371,8 @@ tui_exec() {
         return
       fi
       MODE="${a#mode}"
-      TUI_DONE=1 ;;
+      PLAN_OK=0
+      tui_select_mode ;;
     dryrun)
       if [[ "$DRY_RUN" == "1" ]]; then DRY_RUN=0; else DRY_RUN=1; fi ;;
     thermal)
@@ -1269,10 +1428,13 @@ tui_exec() {
 tui_main() {
   COLS="${COLUMNS:-$(tput cols 2>/dev/null)}"
   [[ -z "$COLS" || "$COLS" == "0" ]] && COLS=80
+  LINES="${LINES:-$(tput lines 2>/dev/null)}"
+  [[ -z "$LINES" || "$LINES" == "0" ]] && LINES=24
   STTY_SAVED="$(stty -g 2>/dev/null)"
   stty -icanon -echo min 1 time 0 2>/dev/null
   trap 'tui_cleanup; exit 130' INT TERM
   tui_screen_on
+  tui_compute_counts
   while [[ "$TUI_DONE" == "0" ]]; do
     tui_draw
     key="$(tui_key)"
@@ -1290,6 +1452,148 @@ tui_main() {
   done
   tui_cleanup
   echo ""
+}
+
+# ---- TUI mode flow: loader -> danger gate (Mode 4) -> plan screen ------------
+TUI_SPIN=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+MODE_COUNTS=()
+
+run_loader() { # title command...  (command runs in a background subshell)
+  local title="$1"; shift
+  local i=0 pct=0 t0
+  t0=$(date +%s)
+  ( "$@" >/dev/null 2>&1 ) &
+  local pid=$!
+  printf '\033[2J\033[H'
+  while kill -0 "$pid" 2>/dev/null; do
+    pct=$(( ( $(date +%s) - t0 ) * 30 ))
+    [[ "$pct" -gt 95 ]] && pct=95
+    printf '\033[H│  %s  %s\n' "${TUI_SPIN[$i]}" "$title"
+    printf '│  [%s] %3d%%\n' "$(tui_bar 24 "$pct")" "$pct"
+    i=$(( (i + 1) % 10 ))
+    sleep 0.08
+  done
+  wait "$pid"
+  # settle at 100% for a beat so the bar is visible even for fast work
+  for ((i=0;i<4;i++)); do
+    printf '\033[H│  %s  %s\n' "${TUI_SPIN[$i]}" "$title"
+    printf '│  [%s] 100%%\n' "$(tui_bar 24 100)"
+    sleep 0.06
+  done
+}
+
+tui_count_all_modes() {
+  local m n tmp
+  for m in 1 2 3 4; do
+    tmp="$(mktemp /tmp/${SCRIPT_NAME}.count.XXXXXX)" || continue
+    MODE="$m" SELECTED_TMP="$tmp" select_by_mode
+    n="$(sort -u "$tmp" | grep -c '|' || true)"
+    printf '%s %s\n' "$m" "$n" >> "$COUNTS_TMP"
+    rm -f "$tmp"
+  done
+}
+
+tui_compute_counts() {
+  [[ -n "${MODE_COUNTS[1]:-}" ]] && return 0
+  COUNTS_TMP="$(mktemp /tmp/${SCRIPT_NAME}.counts.XXXXXX)" || return 0
+  run_loader "Analyzing catalog for mode counts" tui_count_all_modes
+  local m
+  for m in 1 2 3 4; do
+    MODE_COUNTS[$m]="$(awk -v m="$m" '$1==m{print $2}' "$COUNTS_TMP" 2>/dev/null)"
+  done
+  rm -f "$COUNTS_TMP"
+}
+
+tui_danger_gate() { # Mode 4: framed warning, requires typing YES
+  local ans w="${COLS:-80}"
+  printf '\033[2J\033[H'
+  printf '┌%s┐\n' "$(tui_rep '─' $(( w - 2 )))"
+  printf '│%s%s%s│\n' "${C_RED}${C_BOLD}" "$(tui_lpad ' DANGEROUS MODE ' $(( w - 2 )))" "${C_RST}"
+  printf '│%s│\n' "$(tui_lpad ' Disables the CPU thermal-management daemon and a large extra set of services.' $(( w - 2 )))"
+  printf '│%s│\n' "$(tui_lpad ' The machine still boots, but it can overheat. On a laptop that is permanent' $(( w - 2 )))"
+  printf '│%s│\n' "$(tui_lpad ' hardware-damage territory. Many features stop working until you Restore.' $(( w - 2 )))"
+  printf '└%s┘\n' "$(tui_rep '─' $(( w - 2 )))"
+  [[ -n "$STTY_SAVED" ]] && stty "$STTY_SAVED" 2>/dev/null
+  read -r -p "Type YES to arm dangerous mode (anything else goes back): " ans
+  stty -icanon -echo min 1 time 0 2>/dev/null
+  [[ "$ans" == "YES" ]]
+}
+
+tui_plan_screen() { # scrollable plan inside the TUI; Enter confirms, q backs out
+  local -a rows=()
+  local i sel=0 off=0 vh key domain label tier desc line
+  local tier1=0 tier2=0 tier3=0 tier4=0 n lh
+  local w="${COLS:-80}"
+  lh="${LINES:-24}"
+  while IFS='|' read -r domain label tier desc; do
+    [[ -z "$label" ]] && continue
+    rows+=("$domain|$label|$tier|$desc")
+    case "$tier" in
+      1) tier1=$((tier1+1)) ;; 2) tier2=$((tier2+1)) ;; 3) tier3=$((tier3+1)) ;; 4) tier4=$((tier4+1)) ;;
+    esac
+  done < <(sort -u -t'|' -k3,3n -k4,4 -k1,1 -k2,2 "$SELECTED_TMP")
+  n=${#rows[@]}
+  while :; do
+    printf '\033[2J\033[H'
+    tui_topbar " Mode ${MODE} plan - ${n} service(s) " " ${C_BOLD}Mode ${MODE} plan - ${n} service(s)${C_RST} " "$w"; echo ""
+    printf '│  %s  │\n' "$(tui_lpad " safe ${tier1}   aggr ${tier2}   thermal ${tier3}   danger ${tier4}   dry-run $([[ "$DRY_RUN" == "1" ]] && echo ON || echo off)" $(( w - 6 )))"
+    printf '│  %s  │\n' "$(tui_rep '─' $(( w - 6 )))"
+    vh=$(( lh - 9 )); [[ "$vh" -lt 5 ]] && vh=5
+    [[ "$sel" -lt "$off" ]] && off=$sel
+    [[ "$sel" -ge $(( off + vh )) ]] && off=$(( sel - vh + 1 ))
+    for ((i=off; i<off+vh && i<n; i++)); do
+      IFS='|' read -r domain label tier desc <<< "${rows[$i]}"
+      line="$(printf '%-5s %-6s %-40s %s' "$(tier_tag "$tier")" "$domain" "$label" "$desc")"
+      if [[ "$i" == "$sel" ]]; then
+        printf '│  %s%s%s│\n' "${C_BG}${C_BOLD}" "$(tui_lpad " ${line} " $(( w - 4 )))" "${C_RST}"
+      else
+        printf '│  %s%s%s│\n' "$(tier_color "$tier")" "$(tui_lpad " ${line} " $(( w - 4 )))" "${C_RST}"
+      fi
+    done
+    for ((; i<off+vh; i++)); do
+      printf '│  %s  │\n' "$(tui_lpad "" $(( w - 6 )))"
+    done
+    if [[ "$MODE" == "4" ]]; then
+      printf '│  %s  │\n' "$(tui_lpad " Enter apply   h hibernation:$HIBERNATE_OFF   f FileVault:$FILEVAULT_DISABLE   n network:$NETWORK_TUNING   q back " $(( w - 6 )))"
+    else
+      printf '│  %s  │\n' "$(tui_lpad " Enter apply   d dry-run:$DRY_RUN   q back " $(( w - 6 )))"
+    fi
+    printf '└%s┘\n' "$(tui_rep '─' $(( w - 2 )))"
+    key="$(tui_key)"
+    case "$key" in
+      UP|k|K)          sel=$(( sel > 0 ? sel - 1 : 0 )) ;;
+      DOWN|j|J|" ")   sel=$(( sel + 1 < n ? sel + 1 : n - 1 )) ;;
+      ENTER)           return 0 ;;
+      q|Q|ESC|EOF)     return 1 ;;
+      h|H) [[ "$MODE" == "4" ]] && { [[ "$HIBERNATE_OFF" == "1" ]] && HIBERNATE_OFF=0 || HIBERNATE_OFF=1; } ;;
+      f|F) [[ "$MODE" == "4" ]] && { [[ "$FILEVAULT_DISABLE" == "1" ]] && FILEVAULT_DISABLE=0 || FILEVAULT_DISABLE=1; } ;;
+      n|N) [[ "$MODE" == "4" ]] && { [[ "$NETWORK_TUNING" == "1" ]] && NETWORK_TUNING=0 || NETWORK_TUNING=1; } ;;
+      d|D) [[ "$DRY_RUN" == "1" ]] && DRY_RUN=0 || DRY_RUN=1 ;;
+      MOUSE*) : ;;
+    esac
+  done
+}
+
+tui_select_mode() { # loader -> danger gate (Mode 4) -> plan screen; sets TUI_DONE on confirm
+  local count
+  run_loader "Building plan for Mode $MODE" build_plan
+  count="$(sort -u "$SELECTED_TMP" | grep -c '|' || true)"
+  if [[ "$count" == "0" ]]; then
+    printf '\033[2J\033[H'
+    printf '│  No services matched Mode %s on this macOS.\n' "$MODE"
+    printf '│  Try another mode, or List to see what exists.\n'
+    sleep 1
+    return 1
+  fi
+  if [[ "$MODE" == "4" && "$DRY_RUN" != "1" ]]; then
+    tui_danger_gate || return 1
+  fi
+  if tui_plan_screen; then
+    PLAN_OK=1
+    TUI_DONE=1
+    return 0
+  fi
+  return 1
 }
 
 
@@ -1403,7 +1707,13 @@ interactive_flow() {
   print_header
   mode_note
   echo ""
-  select_by_mode
+  if [[ "$PLAN_OK" == "1" ]]; then
+    # Plan was already built and confirmed inside the TUI; reproduce the exact
+    # same selection so what gets applied matches what was shown.
+    build_plan
+  else
+    select_by_mode
+  fi
 
   if [[ -n "${MANUAL_LABELS// /}" ]]; then
     info "manual labels given; overriding mode selection."
@@ -1415,22 +1725,24 @@ interactive_flow() {
     done
   fi
 
-  if [[ "$ASK_THERMAL" == "1" && "$MODE" != "4" ]]; then thermal_confirm; fi
+  if [[ "$PLAN_OK" != "1" ]]; then
+    if [[ "$ASK_THERMAL" == "1" && "$MODE" != "4" ]]; then thermal_confirm; fi
 
-  if [[ "$MODE" == "4" ]]; then
-    if [[ "$DRY_RUN" == "1" ]]; then
-      echo ""
-      warn "dry-run: no confirmation needed; nothing is applied."
-    else
-      dangerous_gate || return 1
-      kernel_confirm
+    if [[ "$MODE" == "4" ]]; then
+      if [[ "$DRY_RUN" == "1" ]]; then
+        echo ""
+        warn "dry-run: no confirmation needed; nothing is applied."
+      else
+        dangerous_gate || return 1
+        kernel_confirm
+      fi
     fi
+
+    show_plan
+    [[ "$(count_picked)" == "0" ]] && { err "nothing selected."; return 1; }
+
+    ask_yes "Apply these changes?" || { warn "aborted."; return 1; }
   fi
-
-  show_plan
-  [[ "$(count_picked)" == "0" ]] && { err "nothing selected."; return 1; }
-
-  ask_yes "Apply these changes?" || { warn "aborted."; return 1; }
 
   if [[ "$DRY_RUN" == "1" ]]; then
     log "${C_BOLD}DRY-RUN: commands only.${C_RST}"
@@ -1548,7 +1860,7 @@ fi
 # interactive_flow returns 1 when the user backs out (abort, nothing selected),
 # in which case we loop back to the menu instead of killing the session.
 while :; do
-  TUI_DONE=0; MODE=0; MANUAL_LABELS=""
+  TUI_DONE=0; MODE=0; MANUAL_LABELS=""; PLAN_OK=0
   tui_main
 
   [[ "$MODE" == "0" && -z "${MANUAL_LABELS// /}" ]] && break
@@ -1557,6 +1869,6 @@ while :; do
   if [[ "$SIP_STATE" != "disabled" && "$DRY_RUN" == "0" ]]; then sip_block; fi
 
   interactive_flow && break
-  # aborted / nothing selected -> back to the menu
+  # aborted / nothing selected / backed out of the plan -> back to the menu
   echo "${C_DIM}Returning to the menu.${C_RST}"
 done
