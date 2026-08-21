@@ -63,7 +63,7 @@ bar() { # width pct -> block string
 progress() { # pct label
   local pct="$1" label="$2"
   if [[ -t 1 ]]; then
-    printf '\r  [%s] %3d%%  %s' "$(bar 24 "$pct")" "$pct" "$label"
+    printf '\r\033[2K  [%s] %3d%%  %s' "$(bar 24 "$pct")" "$pct" "$label"
   else
     printf '  %s\n' "$label"
   fi
