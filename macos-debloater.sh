@@ -294,7 +294,6 @@ com.apple.ManagedClient.cloudconfigurationd|system|2|misc|0|MDM cloud configurat
 com.apple.modelmanagerd|system|2|ai|0|Machine-learning model download manager
 com.apple.rapportd|system|2|sharing|0|AirDrop/Handoff/Continuity (system)
 com.apple.AirPlayXPCHelper|system|2|sharing|0|AirPlay XPC helper
-com.apple.airportd|system|2|network|0|AirPort/Wi-Fi monitoring (ethernet-only machines)
 com.apple.metadata.mds|system|2|spot|0|Spotlight metadata server
 com.apple.metadata.mds.index|system|2|spot|0|Spotlight indexer
 com.apple.metadata.mds.scan|system|2|spot|0|Spotlight scanner
