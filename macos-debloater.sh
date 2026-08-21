@@ -395,7 +395,6 @@ com.apple.screensharing.menuextra|gui|2|screen|0|Screen sharing menu extra
 com.apple.screensharing.MessagesAgent|gui|2|screen|0|Screen sharing Messages agent
 com.apple.ScreenTimeAgent|gui|2|family|0|Screen Time tracking
 com.apple.SSInvitationAgent|gui|2|misc|0|Invitation agent
-com.apple.security.cloudkeychainproxy3|gui|2|cloud|0|iCloud Keychain proxy
 com.apple.sharingd|gui|2|sharing|0|Handoff / universal clipboard
 com.apple.sidecar-hid-relay|gui|2|sharing|0|Sidecar HID relay
 com.apple.sidecar-relay|gui|2|sharing|0|Sidecar relay
