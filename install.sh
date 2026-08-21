@@ -1,7 +1,7 @@
 #!/bin/bash
 # macos-debloater installer - single command, nothing else.
 #
-#   curl -fsSL https://raw.githubusercontent.com/xscope0/macos-debloater/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/gwnodex-bit/macos-debloater/main/install.sh | bash
 #
 # Downloads macos-debloater.sh from this repo, verifies it is a valid bash
 # script, and installs it to /usr/local/bin. No telemetry, no analytics,
@@ -9,7 +9,7 @@
 set -u
 
 tmp=""   # global: the EXIT trap must see it even after main() returns
-REPO_URL="${REPO_URL:-https://raw.githubusercontent.com/xscope0/macos-debloater/main}"
+REPO_URL="${REPO_URL:-https://raw.githubusercontent.com/gwnodex-bit/macos-debloater/main}"
 SRC="$REPO_URL/macos-debloater.sh"
 DEST="${DEST:-/usr/local/bin/macos-debloater}"
 

@@ -129,7 +129,7 @@ The research behind the risky modes (full notes in [RESEARCH.md](RESEARCH.md)) t
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xscope0/macos-debloater/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/gwnodex-bit/macos-debloater/main/install.sh | bash
 ```
 
 The installer prints the banner, downloads `macos-debloater.sh` from this repo with a spinner, verifies it's a valid bash script, and installs it to `/usr/local/bin` (auto-elevating with sudo when needed). It doesn't run the debloater, doesn't phone home, and doesn't leave anything behind except the script.
@@ -216,7 +216,7 @@ The script only acts on an entry if the plist resolves on the running macOS — 
 ## DIY
 
 ```bash
-git clone https://github.com/xscope0/macos-debloater.git
+git clone https://github.com/gwnodex-bit/macos-debloater.git
 cd macos-debloater
 bash -n macos-debloater.sh        # syntax
 shellcheck macos-debloater.sh     # lint, clean at warning level
