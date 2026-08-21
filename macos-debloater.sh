@@ -439,7 +439,6 @@ com.apple.bookdatastored|gui|4|extra|0|Books/Apple Books data store
 com.apple.commerce|gui|4|extra|0|Commerce engine
 com.apple.cloudphotod|gui|4|extra|0|iCloud Photos library sync
 com.apple.amp.mediasharingd|gui|4|extra|0|Media sharing (Home Sharing / AirPlay to Mac)
-com.apple.keychainsharingmessagingd|gui|4|extra|0|Keychain sharing messaging
 com.apple.email.maild|gui|4|extra|0|Mail daemon (disables Mail fetch/push)
 com.apple.mdworker.mail|gui|4|extra|0|Mail indexing worker
 com.apple.AddressBook.SourceSync|gui|4|extra|0|Contacts source sync
